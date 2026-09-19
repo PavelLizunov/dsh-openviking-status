@@ -45,7 +45,7 @@ jobs:
       - name: Typecheck (tsc)
         run: pnpm exec tsc --noEmit
 
-      - name: Check README install URL matches package version
+      - name: Check manifest consistency
         run: node scripts/check-readme-version.mjs
 
       - name: Run automated test suite

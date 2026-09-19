@@ -1,25 +1,42 @@
 /**
- * Проверка, что ссылка на тарбол в README указывает на текущую версию пакета.
+ * Предрелизные проверки манифеста: то, что ломает релиз уже после тега.
  *
- * Установка рекомендуется по версионному URL: плавающий
- * `/releases/latest/download/…` не получает `integrity` и ломает последующие
- * `pnpm install` в профиле пользователя (ADR 0004). Плата за это — номер версии
- * в README живёт вручную и легко отстаёт от `package.json`, а расходится он
- * тихо: команда из README продолжает работать, просто ставит старую версию.
+ * 1. Ссылка на тарбол в README против текущей версии. Установка рекомендуется
+ *    по версионному URL: плавающий `/releases/latest/download/…` не получает
+ *    `integrity` и ломает последующие `pnpm install` в профиле пользователя
+ *    (ADR 0004). Плата за это — номер версии в README живёт вручную и расходится
+ *    тихо: команда из README продолжает работать, просто ставит старую версию.
  *
- * Скрипт превращает это из незаметного расхождения в падение CI.
+ * 2. `repository.url` в манифесте. Публикация идёт через trusted publishing, а
+ *    npm сверяет это поле с репозиторием, который собрал пакет, и отвергает
+ *    расхождение: `422 ... "repository.url" is "", expected to match ...`.
+ *    Сбой случается в самом конце релиза — после тега и GitHub Release, — и
+ *    оставляет реестр на версию позади.
  */
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const { version, name } = JSON.parse(
-  readFileSync(join(root, "package.json"), "utf8")
-);
+const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+const { version, name, repository } = manifest;
 const readme = readFileSync(join(root, "README.md"), "utf8");
 
 const problems = [];
+
+// Провенанс сверяет владельца и имя репозитория, а не точную форму URL,
+// поэтому проверяем именно их.
+const EXPECTED_REPO = "github.com/dipertq/dsh-openviking-status";
+const repoUrl = typeof repository === "string" ? repository : repository?.url;
+if (!repoUrl) {
+  problems.push(
+    "в package.json нет repository.url — npm отвергнет публикацию с provenance (422)"
+  );
+} else if (!repoUrl.includes(EXPECTED_REPO)) {
+  problems.push(
+    `repository.url указывает на ${repoUrl}, а provenance ожидает ${EXPECTED_REPO}`
+  );
+}
 
 // Плавающая ссылка не должна попасть в документацию ни при каких условиях,
 // кроме абзаца, который объясняет, почему её нельзя использовать.
@@ -58,12 +75,12 @@ for (const [, urlVersion, asset] of tarballUrls) {
 }
 
 if (problems.length > 0) {
-  console.error("README рассинхронизирован с package.json:\n");
+  console.error(`Проверка манифеста не пройдена (версия ${version}):\n`);
   for (const problem of problems) console.error(`  - ${problem}`);
   console.error(
-    `\nОбновите ссылку на установку в README.md до версии ${version}.`
+    "\nЭти расхождения ломают релиз уже после тега, поэтому ловятся здесь."
   );
   process.exit(1);
 }
 
-console.log(`README install URL matches package version ${version}`);
+console.log(`manifest checks passed for version ${version}`);

@@ -1,8 +1,16 @@
 {
   "name": "@dipertq/dsh-openviking-status",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Minimalist OpenViking status chip and popover for DeepSeek Harness composer",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dipertq/dsh-openviking-status.git"
+  },
+  "homepage": "https://github.com/dipertq/dsh-openviking-status#readme",
+  "bugs": {
+    "url": "https://github.com/dipertq/dsh-openviking-status/issues"
+  },
   "main": "lib/index.js",
   "module": "lib/index.js",
   "types": "lib/index.d.ts",
