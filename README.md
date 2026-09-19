@@ -33,7 +33,7 @@ Equivalent, and useful when the registry is unreachable. Use a
 **version-pinned** URL:
 
 ```bash
-dsh plugin add https://github.com/dipertq/dsh-openviking-status/releases/download/v0.1.5/dipertq-dsh-openviking-status-0.1.5.tgz
+dsh plugin add https://github.com/dipertq/dsh-openviking-status/releases/download/v0.1.6/dipertq-dsh-openviking-status-0.1.6.tgz
 ```
 
 Not `/releases/latest/download/…`: that URL keeps its name while its content
