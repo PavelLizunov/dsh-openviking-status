@@ -17,16 +17,38 @@ See [CONTEXT.md](./CONTEXT.md), [ADR 0001](./docs/adr/0001-client-ui-widget.md),
 
 ## Installation in DeepSeek Harness
 
-### Option A: From Source
+### Option A: Direct GitHub Install (Recommended)
+
+In your DSH terminal / shell:
 
 ```bash
+dsh plugin add github:dipertq/dsh-openviking-status#v0.1.0
+```
+
+Or add directly to `~/.dsh/profiles/desktop/package.json`:
+
+```json
+"dependencies": {
+  "@openviking-community/dsh-openviking-status": "github:dipertq/dsh-openviking-status#v0.1.0"
+}
+```
+
+_The plugin's `prepare` script will automatically compile `lib/` via `tsup` upon installation._
+
+### Option B: From GitHub Release Tarball
+
+```bash
+dsh plugin add https://github.com/dipertq/dsh-openviking-status/releases/download/v0.1.0/openviking-community-dsh-openviking-status-0.1.0.tgz
+```
+
+### Option C: From Local Source
+
+```bash
+git clone https://github.com/dipertq/dsh-openviking-status.git
+cd dsh-openviking-status
 pnpm install
 pnpm run build
 ```
-
-### Option B: From GitHub Release
-
-Download the `dsh-openviking-status-vX.Y.Z.tgz` tarball or unzip `dsh-openviking-status-lib.zip` directly into your local plugins directory.
 
 ### Register in Cordis patch
 

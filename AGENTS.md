@@ -32,5 +32,6 @@ Releases are automated via GitHub Actions:
    - Minor release (new backward-compatible features): `pnpm run release:minor`
    - Major release (breaking architectural changes): `pnpm run release:major`
    - Or manually: `git tag vX.Y.Z && git push origin vX.Y.Z`
-4. Never push a tag on a broken or unverified branch.
-5. See `docs/adr/0002-release-workflow.md` for the architectural decision record.
+4. Direct Git-hosted installs: The package `prepare` and `prepack` scripts run `tsup` so that `dsh plugin add github:dipertq/dsh-openviking-status` automatically builds `lib/` in the user profile's node_modules without requiring prebuilt artifacts in git.
+5. Never push a tag on a broken or unverified branch.
+6. See `docs/adr/0002-release-workflow.md` for the architectural decision record.

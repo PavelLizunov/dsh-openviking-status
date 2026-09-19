@@ -14,10 +14,11 @@
 1. **Разделение CI и CD контуров**:
    - **CI (`.github/workflows/ci.yml`)**: запускается на каждый `push` и `pull_request` в ветку `main`. Проверяет строгую компиляцию TypeScript (`tsc --noEmit`), полный тестовый сьют (`pnpm test`) и сборку пакетов (`pnpm run build`).
    - **Release CD (`.github/workflows/release.yml`)**: запускается при пуше тегов с префиксом `v*` (например, `v0.1.0`), а также вручную через `workflow_dispatch`.
-2. **Артефакты релиза**:
+2. **Артефакты релиза и поддержка прямых Git-установок**:
    - `dsh-openviking-status-vX.Y.Z.tgz`: упакованный архив плагина (`pnpm pack`), готовый к установке в окружение DSH.
    - `dsh-openviking-status-lib.zip`: сжатая директория предкомпилированных CJS/ESM/DTS бандлов `lib/`.
    - Автоматически сгенерированный список изменений (GitHub release notes).
+   - **Прямая установка по GitHub-ссылке**: Скрипты `prepare` и `prepack` в `package.json` выполняют `tsup && (husky || true)`, благодаря чему при установке через `dsh plugin add github:dipertq/dsh-openviking-status#vX.Y.Z` (или через `pnpm add`) исходный код TypeScript автоматически компилируется в `lib/` прямо в `node_modules` целевого профиля DSH без необходимости коммитить артефакты сборки в git.
 3. **Команды выпуска релиза**:
    - В `package.json` настроен хук `preversion` (`pnpm run build && pnpm test`), предотвращающий создание тега при наличии сбоев.
    - Добавлены скрипты `pnpm run release:patch`, `release:minor`, `release:major`, выполняющие инкремент версии, создание Git-тега и пуш с `--follow-tags`.
