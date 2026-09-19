@@ -54,6 +54,25 @@ allowBuilds:
 The tarball ships `lib/` already compiled, so no build script runs and no
 allowlist entry is needed. See [ADR 0004](./docs/adr/0004-install-paths.md).
 
+### Troubleshooting: `ERR_PNPM_IGNORED_BUILDS`
+
+If a previous `github:` attempt left entries in your profile's
+`pnpm-workspace.yaml`, pnpm may have written them with a literal placeholder:
+
+```yaml
+allowBuilds:
+  "@openviking-community/dsh-openviking-status@https://...": set this to true or false
+```
+
+A placeholder means "not decided yet", so every install fails until it is a real
+boolean. Delete those stale entries — installing from the tarball needs none of
+them:
+
+```yaml
+allowBuilds:
+  node-pty: true
+```
+
 ## Releases & CI/CD
 
 - **CI**: Runs on every pull request and push to `main` (`tsc`, README install-URL
