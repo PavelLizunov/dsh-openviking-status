@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { HealthStatus, SessionStatus } from "./api";
 import { RecalledMemoriesResult, RecalledMemoryItem } from "./recallParser";
 import { COMMIT_THRESHOLD } from "./OpenVikingStatusChip";
@@ -177,17 +177,16 @@ export function OpenVikingStatusPopover({
   style,
 }: OpenVikingStatusPopoverProps) {
   const [copied, setCopied] = useState(false);
+  const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Закрытие по нажатию клавиши Escape
+  // Очистка таймера сброса статуса копирования при размонтировании
   useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      handleEscapeKey(event, onClose);
-    }
-    if (typeof document !== "undefined") {
-      document.addEventListener("keydown", handleKeyDown);
-      return () => document.removeEventListener("keydown", handleKeyDown);
-    }
-  }, [onClose]);
+    return () => {
+      if (copyTimeoutRef.current) {
+        clearTimeout(copyTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const isOnline = health?.ok === true;
   const statusColor = isOnline
@@ -207,7 +206,13 @@ export function OpenVikingStatusPopover({
     if (typeof navigator !== "undefined" && navigator.clipboard) {
       navigator.clipboard.writeText(displaySessionId).catch(() => {});
       setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
+      if (copyTimeoutRef.current) {
+        clearTimeout(copyTimeoutRef.current);
+      }
+      copyTimeoutRef.current = setTimeout(() => {
+        setCopied(false);
+        copyTimeoutRef.current = null;
+      }, 1500);
     }
   }, [displaySessionId]);
 
@@ -236,6 +241,7 @@ export function OpenVikingStatusPopover({
         ...style,
       }}
     >
+      <style>{`@keyframes ov-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
       {/* Header: Title, Endpoint, Status Badge */}
       <div
         style={{
@@ -335,6 +341,15 @@ export function OpenVikingStatusPopover({
           >
             <span
               data-testid="session-id-value"
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  handleCopySessionId();
+                }
+              }}
+              aria-label="Click to copy Session ID"
               style={{
                 fontFamily: "var(--dsw-font-mono, monospace)",
                 cursor: "pointer",
@@ -349,6 +364,7 @@ export function OpenVikingStatusPopover({
               data-testid="copy-session-btn"
               onClick={handleCopySessionId}
               title={copied ? "Copied!" : "Copy Session ID"}
+              aria-label={copied ? "Copied!" : "Copy Session ID"}
               style={{
                 background: "none",
                 border: "none",

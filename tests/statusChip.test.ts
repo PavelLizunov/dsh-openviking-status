@@ -9,6 +9,7 @@ import {
   formatTooltipTitle,
   getStatusIndicatorColor,
   getStatusGlow,
+  getFallbackSessionMessages,
   apply,
 } from "../lib/client.mjs";
 
@@ -329,5 +330,47 @@ describe("apply(ctx) Cordis Registration", () => {
 
     // Component registered is OpenVikingStatusChip
     assert.strictEqual(registeredComponent, OpenVikingStatusChip);
+  });
+});
+
+describe("getFallbackSessionMessages", () => {
+  it("returns undefined for empty sessionId or when window is undefined", () => {
+    assert.strictEqual(getFallbackSessionMessages(""), undefined);
+  });
+
+  it("extracts messages from window.__DSH_STORE__ conversations state", () => {
+    const originalWindow = (globalThis as any).window;
+    try {
+      const mockMessages = [{ role: "user", content: "hello from store" }];
+      (globalThis as any).window = {
+        __DSH_STORE__: {
+          getState: () => ({
+            conversations: {
+              "sess-1": { messages: mockMessages },
+            },
+          }),
+        },
+      };
+      const result = getFallbackSessionMessages("sess-1");
+      assert.deepStrictEqual(result, mockMessages);
+    } finally {
+      (globalThis as any).window = originalWindow;
+    }
+  });
+
+  it("extracts messages from window.__DSH_SESSION_MESSAGES__ fallback", () => {
+    const originalWindow = (globalThis as any).window;
+    try {
+      const mockMessages = [{ role: "user", content: "hello from global map" }];
+      (globalThis as any).window = {
+        __DSH_SESSION_MESSAGES__: {
+          "sess-2": mockMessages,
+        },
+      };
+      const result = getFallbackSessionMessages("sess-2");
+      assert.deepStrictEqual(result, mockMessages);
+    } finally {
+      (globalThis as any).window = originalWindow;
+    }
   });
 });

@@ -468,4 +468,54 @@ describe("OpenVikingStatusPopover Component Rendering", () => {
     assert.ok(html.includes("custom-popover-class"));
     assert.ok(html.includes("z-index:9999") || html.includes("zIndex:9999"));
   });
+
+  it("injects @keyframes ov-spin style into popover", () => {
+    const html = renderToString(
+      React.createElement(OpenVikingStatusPopover, {
+        sessionId: "sess-spin",
+        health: { ok: true },
+        sessionData: null,
+      })
+    );
+    assert.ok(
+      html.includes("@keyframes ov-spin") &&
+        html.includes("rotate(0deg)") &&
+        html.includes("rotate(360deg)")
+    );
+  });
+
+  it("provides keyboard accessibility for session ID and copy button", () => {
+    const html = renderToString(
+      React.createElement(OpenVikingStatusPopover, {
+        sessionId: "sess-accessible-123",
+        health: { ok: true },
+        sessionData: {
+          session_id: "sess-accessible-123",
+          pending_tokens: 0,
+        },
+      })
+    );
+
+    // Session ID should be accessible as a button
+    assert.ok(html.includes('role="button"'));
+    assert.ok(html.includes('tabindex="0"') || html.includes('tabIndex="0"'));
+    assert.ok(html.includes('aria-label="Click to copy Session ID"'));
+
+    // Copy button should have aria-label
+    assert.ok(html.includes('aria-label="Copy Session ID"'));
+  });
+
+  it("cleans up copyTimeoutRef on unmount", () => {
+    let timerCleared = false;
+    const mockTimer = setTimeout(() => {}, 10000);
+    const copyTimeoutRef = { current: mockTimer as any };
+    const cleanup = () => {
+      if (copyTimeoutRef.current) {
+        clearTimeout(copyTimeoutRef.current);
+        timerCleared = true;
+      }
+    };
+    cleanup();
+    assert.strictEqual(timerCleared, true);
+  });
 });

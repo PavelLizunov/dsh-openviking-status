@@ -2,6 +2,7 @@ import React from "react";
 import {
   OpenVikingStatusChip,
   OpenVikingStatusChipProps,
+  getFallbackSessionMessages,
 } from "./OpenVikingStatusChip";
 import {
   OpenVikingStatusPopover,
@@ -67,16 +68,8 @@ export function apply(ctx: any) {
             }
 
             // Fallback from global DSH store or window if messages not found yet
-            if (!messages && typeof window !== "undefined") {
-              const win = window as any;
-              if (win.__DSH_STORE__?.getState) {
-                const state = win.__DSH_STORE__.getState();
-                messages =
-                  state?.conversations?.[sessionId]?.messages ||
-                  state?.sessions?.[sessionId]?.messages;
-              } else if (win.__DSH_SESSION_MESSAGES__?.[sessionId]) {
-                messages = win.__DSH_SESSION_MESSAGES__[sessionId];
-              }
+            if (!messages) {
+              messages = getFallbackSessionMessages(sessionId);
             }
 
             return {
@@ -100,6 +93,7 @@ if (typeof window !== "undefined" && (window as any).__ModuleLoader__) {
       const module: any = { exports: {} };
       module.exports.apply = apply;
       module.exports.OpenVikingStatusChip = OpenVikingStatusChip;
+      module.exports.getFallbackSessionMessages = getFallbackSessionMessages;
       module.exports.OpenVikingStatusPopover = OpenVikingStatusPopover;
       module.exports.getProgressBarPercent = getProgressBarPercent;
       module.exports.getProgressBarColor = getProgressBarColor;
