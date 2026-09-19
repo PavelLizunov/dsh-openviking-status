@@ -22,7 +22,7 @@ See [CONTEXT.md](./CONTEXT.md), [ADR 0001](./docs/adr/0001-client-ui-widget.md),
 In the DSH terminal, using the current version:
 
 ```bash
-dsh plugin add https://github.com/dipertq/dsh-openviking-status/releases/download/v0.1.4/openviking-community-dsh-openviking-status-0.1.4.tgz
+dsh plugin add https://github.com/dipertq/dsh-openviking-status/releases/download/v0.1.5/openviking-community-dsh-openviking-status-0.1.5.tgz
 ```
 
 Then restart DSH Desktop. That is the whole procedure: DSH reads the package's

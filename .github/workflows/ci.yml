@@ -32,6 +32,12 @@ jobs:
       - name: Typecheck (tsc)
         run: pnpm exec tsc --noEmit
 
+      # The documented install URL is version-pinned on purpose (ADR 0004), so
+      # it has to be bumped by hand and drifts silently — the stale command
+      # still works, it just installs an old version.
+      - name: Check README install URL matches package version
+        run: node scripts/check-readme-version.mjs
+
       - name: Run automated test suite
         run: pnpm test
 
