@@ -1,5 +1,7 @@
 node_modules
 .pnpm-store
+.worktrees
+.scratch
 lib
 dist
 .DS_Store
