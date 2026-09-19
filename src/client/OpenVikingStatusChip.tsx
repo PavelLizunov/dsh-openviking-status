@@ -111,6 +111,29 @@ export function getStatusGlow(
 }
 
 /**
+ * Извлечение сообщений сессии из глобального хранилища DSH (Redux store или window fallback).
+ */
+export function getFallbackSessionMessages(
+  sessionId: string
+): any[] | undefined {
+  if (!sessionId || typeof window === "undefined") {
+    return undefined;
+  }
+  const win = window as any;
+  if (win.__DSH_STORE__?.getState) {
+    const state = win.__DSH_STORE__.getState();
+    return (
+      state?.conversations?.[sessionId]?.messages ||
+      state?.sessions?.[sessionId]?.messages
+    );
+  }
+  if (win.__DSH_SESSION_MESSAGES__?.[sessionId]) {
+    return win.__DSH_SESSION_MESSAGES__[sessionId];
+  }
+  return undefined;
+}
+
+/**
  * Status Chip UI-компонент отображения состояния памяти OpenViking.
  * Формат в соответствии с CONTEXT.md:
  * 🟢 OV: <recalled> rec · <pending>k pend (или OV offline при недоступности сервиса).
@@ -142,20 +165,7 @@ export function OpenVikingStatusChip({
   // Извлечение сообщений из глобального хранилища DSH, если они не были переданы напрямую в props
   const fallbackMessages = useMemo(() => {
     if (messages || contextText) return undefined;
-    if (typeof window !== "undefined") {
-      const win = window as any;
-      if (win.__DSH_STORE__?.getState) {
-        const state = win.__DSH_STORE__.getState();
-        return (
-          state?.conversations?.[sessionId]?.messages ||
-          state?.sessions?.[sessionId]?.messages
-        );
-      }
-      if (win.__DSH_SESSION_MESSAGES__?.[sessionId]) {
-        return win.__DSH_SESSION_MESSAGES__[sessionId];
-      }
-    }
-    return undefined;
+    return getFallbackSessionMessages(sessionId);
   }, [sessionId, messages, contextText]);
 
   // Объединение доступного контекста для парсинга воспоминаний
