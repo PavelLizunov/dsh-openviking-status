@@ -10,7 +10,11 @@
     "pretest": "tsup",
     "dev": "tsup --watch",
     "test": "node --test tests/*.test.ts",
-    "prepare": "husky"
+    "prepare": "husky",
+    "preversion": "pnpm run build && pnpm test",
+    "release:patch": "npm version patch && git push --follow-tags",
+    "release:minor": "npm version minor && git push --follow-tags",
+    "release:major": "npm version major && git push --follow-tags"
   },
   "keywords": [
     "dsh-plugin",
