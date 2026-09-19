@@ -3,8 +3,9 @@ import { defineConfig } from "tsup";
 export default defineConfig({
   entry: {
     client: "src/client/index.tsx",
-    index: "src/index.ts"
+    index: "src/index.ts",
   },
+  outDir: "lib",
   format: ["cjs", "esm"],
   dts: true,
   clean: true,
@@ -16,6 +17,6 @@ export default defineConfig({
     "@deepseek-ai/cordis",
     "@deepseek-ai/dsh-client-store",
     "@deepseek-ai/dsh-client-ui-primitives",
-    "@deepseek-ai/dsh-client-ui-slots"
-  ]
+    "@deepseek-ai/dsh-client-ui-slots",
+  ],
 });
