@@ -12,7 +12,7 @@ import {
   truncateSessionId,
   handleEscapeKey,
   COMMIT_THRESHOLD,
-} from "../lib/client.mjs";
+} from "../lib/client.js";
 
 describe("getProgressBarPercent", () => {
   it("returns 0 for 0 or negative tokens", () => {

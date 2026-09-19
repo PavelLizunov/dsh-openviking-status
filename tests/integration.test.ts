@@ -7,7 +7,7 @@ import {
   OpenVikingStatusChip,
   OpenVikingStatusPopover,
   parseRecalledMemories,
-} from "../lib/client.mjs";
+} from "../lib/client.js";
 import type { SessionStatus, HealthStatus } from "../src/client/api";
 
 describe("OpenViking E2E Integration Scenario", () => {

@@ -9,7 +9,7 @@ import {
   fetchSession,
   getSession,
   commitSession,
-} from "../lib/client.mjs";
+} from "../lib/client.js";
 
 interface MockRequestRecord {
   url: string;

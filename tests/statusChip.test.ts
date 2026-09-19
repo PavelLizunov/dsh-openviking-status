@@ -11,7 +11,7 @@ import {
   getStatusGlow,
   getFallbackSessionMessages,
   apply,
-} from "../lib/client.mjs";
+} from "../lib/client.js";
 
 describe("formatPendingTokens", () => {
   it("formats 0 tokens as '0k pend'", () => {
@@ -278,58 +278,49 @@ Wrench board
 });
 
 describe("apply(ctx) Cordis Registration", () => {
-  it("registers conversation.input.right slot and injects sessionId and messages", () => {
-    let registeredTargetSlot: string | null = null;
+  // `conversation.input.right` — списочный слот со скоупом сессии, поэтому
+  // `sessionId` приходит компоненту стандартным пропом от владельца слота.
+  // Ячейка адресуется парой `name` + собственный `id`; чужой `id` занял бы
+  // и заменил ячейку соседнего плагина.
+  it("занимает собственную ячейку в conversation.input.right", () => {
+    let injectedSlot: string | null = null;
     let registeredOptions: any = null;
     let registeredComponent: any = null;
+    let effectLabel: string | null = null;
+    let cellDisposed = false;
 
-    const mockScope = {
+    const mockCtx = {
+      effect: (factory: () => () => void, label: string) => {
+        effectLabel = label;
+        const dispose = factory();
+        // Без disposer ячейка пережила бы выгрузку плагина.
+        assert.strictEqual(typeof dispose, "function");
+        dispose();
+      },
       slots: {
-        inject: (slotName: string, callback: () => void) => {
-          registeredTargetSlot = slotName;
-          callback();
+        inject: (slotName: string, callback: () => () => void) => {
+          injectedSlot = slotName;
+          return callback();
         },
         register: (options: any, component: any) => {
           registeredOptions = options;
           registeredComponent = component;
+          return () => {
+            cellDisposed = true;
+          };
         },
-      },
-    };
-
-    const mockCtx = {
-      inject: (deps: string[], callback: (scope: any) => void) => {
-        assert.deepStrictEqual(deps, ["slots"]);
-        callback(mockScope);
       },
     };
 
     apply(mockCtx);
 
-    assert.strictEqual(registeredTargetSlot, "conversation.input.right");
-    assert.ok(registeredOptions);
-    assert.strictEqual(typeof registeredOptions.inject, "function");
-
-    // Test inject function with string sessionId and extra scope
-    const injectedProps = registeredOptions.inject("sess-789", {
-      messages: [{ role: "user", content: "hello" }],
-      contextText: "some context",
-    });
-
-    assert.strictEqual(injectedProps.sessionId, "sess-789");
-    assert.strictEqual(injectedProps.messages.length, 1);
-    assert.strictEqual(injectedProps.contextText, "some context");
-
-    // Test inject function with object sessionOrScope
-    const injectedPropsObj = registeredOptions.inject({
-      sessionId: "sess-abc",
-      messages: [{ role: "assistant", content: "hi" }],
-    });
-
-    assert.strictEqual(injectedPropsObj.sessionId, "sess-abc");
-    assert.strictEqual(injectedPropsObj.messages.length, 1);
-
-    // Component registered is OpenVikingStatusChip
+    assert.strictEqual(injectedSlot, "conversation.input.right");
+    assert.strictEqual(registeredOptions.name, "conversation.input.right");
+    assert.strictEqual(registeredOptions.id, "openviking-status");
+    assert.strictEqual(typeof registeredOptions.order, "number");
     assert.strictEqual(registeredComponent, OpenVikingStatusChip);
+    assert.ok(effectLabel);
+    assert.strictEqual(cellDisposed, true);
   });
 });
 
