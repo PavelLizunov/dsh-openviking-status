@@ -1,7 +1,30 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { HealthStatus, SessionStatus, defaultOpenVikingClient } from "./api";
+import {
+  HealthStatus,
+  SessionStatus,
+  CommitOptions,
+  CommitResult,
+  PendingTokens,
+  PeerId,
+  DEFAULT_OPENVIKING_ENDPOINT,
+  resolveEndpoint,
+  resolveApiKey,
+  OpenVikingClient,
+  defaultOpenVikingClient,
+  checkHealth,
+  fetchSession,
+  getSession,
+  commitSession,
+} from "./api";
+import {
+  RecalledMemoryItem,
+  RecalledMemoriesResult,
+  parseRecalledMemories,
+  inferCategory,
+} from "./recallParser";
 
 export * from "./api";
+export * from "./recallParser";
 
 export type OpenVikingSessionData = SessionStatus;
 export type OpenVikingHealth = HealthStatus;
@@ -309,6 +332,17 @@ if (typeof window !== "undefined" && (window as any).__ModuleLoader__) {
       const module: any = { exports: {} };
       module.exports.apply = apply;
       module.exports.OpenVikingStatusChip = OpenVikingStatusChip;
+      module.exports.parseRecalledMemories = parseRecalledMemories;
+      module.exports.inferCategory = inferCategory;
+      module.exports.OpenVikingClient = OpenVikingClient;
+      module.exports.defaultOpenVikingClient = defaultOpenVikingClient;
+      module.exports.checkHealth = checkHealth;
+      module.exports.fetchSession = fetchSession;
+      module.exports.getSession = getSession;
+      module.exports.commitSession = commitSession;
+      module.exports.resolveEndpoint = resolveEndpoint;
+      module.exports.resolveApiKey = resolveApiKey;
+      module.exports.DEFAULT_OPENVIKING_ENDPOINT = DEFAULT_OPENVIKING_ENDPOINT;
       return module.exports;
     },
   });
