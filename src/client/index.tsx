@@ -4,6 +4,18 @@ import {
   OpenVikingStatusChipProps,
 } from "./OpenVikingStatusChip";
 import {
+  OpenVikingStatusPopover,
+  OpenVikingStatusPopoverProps,
+  getProgressBarPercent,
+  getProgressBarColor,
+  formatRelativeTime,
+  formatMemoryLeafName,
+  formatEndpoint,
+  truncateSessionId,
+  getCategoryBadgeStyle,
+  handleEscapeKey,
+} from "./OpenVikingStatusPopover";
+import {
   OpenVikingClient,
   defaultOpenVikingClient,
   checkHealth,
@@ -19,6 +31,7 @@ import { parseRecalledMemories, inferCategory } from "./recallParser";
 export * from "./api";
 export * from "./recallParser";
 export * from "./OpenVikingStatusChip";
+export * from "./OpenVikingStatusPopover";
 
 export type OpenVikingSessionData = import("./api").SessionStatus;
 export type OpenVikingHealth = import("./api").HealthStatus;
@@ -87,6 +100,15 @@ if (typeof window !== "undefined" && (window as any).__ModuleLoader__) {
       const module: any = { exports: {} };
       module.exports.apply = apply;
       module.exports.OpenVikingStatusChip = OpenVikingStatusChip;
+      module.exports.OpenVikingStatusPopover = OpenVikingStatusPopover;
+      module.exports.getProgressBarPercent = getProgressBarPercent;
+      module.exports.getProgressBarColor = getProgressBarColor;
+      module.exports.formatRelativeTime = formatRelativeTime;
+      module.exports.formatMemoryLeafName = formatMemoryLeafName;
+      module.exports.formatEndpoint = formatEndpoint;
+      module.exports.truncateSessionId = truncateSessionId;
+      module.exports.getCategoryBadgeStyle = getCategoryBadgeStyle;
+      module.exports.handleEscapeKey = handleEscapeKey;
       module.exports.parseRecalledMemories = parseRecalledMemories;
       module.exports.inferCategory = inferCategory;
       module.exports.OpenVikingClient = OpenVikingClient;

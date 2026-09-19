@@ -240,6 +240,40 @@ Wrench board
 
     assert.ok(html.includes("custom-status-chip-class"));
   });
+
+  it("renders popover dialog when initialOpen is true", () => {
+    const html = renderToString(
+      React.createElement(OpenVikingStatusChip, {
+        sessionId: "test-session-open",
+        initialOpen: true,
+        initialHealth: { ok: true, version: "0.2.1" },
+        initialSessionData: {
+          session_id: "test-session-open",
+          pending_tokens: 5000,
+        },
+      })
+    );
+
+    assert.ok(html.includes('aria-expanded="true"'));
+    assert.ok(html.includes('role="dialog"'));
+    assert.ok(html.includes("OpenViking Memory Details"));
+  });
+
+  it("does not render popover dialog when closed (default)", () => {
+    const html = renderToString(
+      React.createElement(OpenVikingStatusChip, {
+        sessionId: "test-session-closed",
+        initialHealth: { ok: true },
+        initialSessionData: {
+          session_id: "test-session-closed",
+          pending_tokens: 5000,
+        },
+      })
+    );
+
+    assert.ok(html.includes('aria-expanded="false"'));
+    assert.ok(!html.includes('role="dialog"'));
+  });
 });
 
 describe("apply(ctx) Cordis Registration", () => {
