@@ -8,6 +8,7 @@
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
+    "test": "node --test tests/*.test.ts",
     "prepare": "husky"
   },
   "keywords": [
