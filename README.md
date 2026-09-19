@@ -56,14 +56,39 @@ allowlist entry is needed. See [ADR 0004](./docs/adr/0004-install-paths.md).
 
 ## Releases & CI/CD
 
-- **CI**: Runs on every pull request and push to `main` (`tsc`, `pnpm test`, `pnpm run build`).
-- **Release**: Automatically publishes GitHub Releases with compiled artifacts (`.tgz` and `.zip`) when a tag `v*` is pushed.
+- **CI**: Runs on every pull request and push to `main` (`tsc`, README install-URL
+  check, `pnpm test`, `pnpm run build`).
+- **Release**: Pushing a `v*` tag builds the package, verifies it, and publishes a
+  GitHub Release with the versioned `.tgz`.
 - **Trigger a release**:
   ```bash
   pnpm run release:patch  # 0.1.0 -> 0.1.1
   pnpm run release:minor  # 0.1.0 -> 0.2.0
   pnpm run release:major  # 0.1.0 -> 1.0.0
   ```
+  Bump the install URL in this README to the new version — CI fails if it drifts.
+
+### Publishing to npm (optional, removes both install caveats)
+
+The release workflow already has an npm publish step; it no-ops until the
+repository has an `NPM_TOKEN` secret. Once published, installation becomes a
+plain name with no URL, no `allowBuilds`, and no version to keep in sync:
+
+```bash
+dsh plugin add @openviking-community/dsh-openviking-status
+```
+
+To enable it:
+
+1. Create the `openviking-community` scope (or change `name` in `package.json`
+   to a scope you own) at <https://www.npmjs.com/org/create>.
+2. Generate an **Automation** access token at
+   <https://www.npmjs.com/settings/~/tokens>.
+3. Add it as the `NPM_TOKEN` repository secret:
+   ```bash
+   gh secret set NPM_TOKEN
+   ```
+4. Cut the next release as usual.
 
 ## License
 
