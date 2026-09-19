@@ -59,7 +59,14 @@ Releases are automated via GitHub Actions:
    - Minor release (new backward-compatible features): `pnpm run release:minor`
    - Major release (breaking architectural changes): `pnpm run release:major`
    - Or manually: `git tag vX.Y.Z && git push origin vX.Y.Z`
-4. Direct Git-hosted installs: The package exports `cordis.patch.yml` and declares `"dsh": { "bundle": { "patch": "./cordis.patch.yml" } }`. When a user runs `dsh plugin add github:dipertq/dsh-openviking-status#vX.Y.Z`, DSH automatically reconciles it as an active profile bundle. The `prepare` and `prepack` scripts run `tsup` so that `lib/` compiles automatically upon install.
+4. **Recommend the release tarball, never `github:`.** A `github:` spec makes
+   pnpm run `prepare` on the user's machine, and the pnpm bundled with DSH
+   Desktop (11.8.0) blocks that until a _commit-pinned_ `allowBuilds` key is
+   added — a key that changes on every push. The packed tarball ships `lib/`
+   pre-built, so no build script runs and no allowlist entry is needed. The
+   documented link is `/releases/latest/download/dsh-openviking-status.tgz`,
+   a version-free asset the release workflow publishes alongside the versioned
+   one. Details and the experiment in `docs/adr/0004-install-paths.md`.
 5. Never manually add a package to `dsh.profile.bundles` if its `package.json` does not declare `dsh.bundle.patch` — doing so will trigger DSH Recovery Mode.
 6. Never push a tag on a broken or unverified branch.
 7. See `docs/adr/0002-release-workflow.md` for the architectural decision record.

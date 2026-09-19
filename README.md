@@ -17,49 +17,41 @@ See [CONTEXT.md](./CONTEXT.md), [ADR 0001](./docs/adr/0001-client-ui-widget.md),
 
 ## Installation in DeepSeek Harness
 
-### Option A: Standard `dsh plugin add` (Recommended)
+### Release tarball (recommended)
 
-In your DSH terminal / shell:
-
-```bash
-dsh plugin add github:dipertq/dsh-openviking-status#v0.1.2
-```
-
-**That's it!** DSH will:
-
-1. Automatically download the plugin repository and compile `lib/` via `tsup`.
-2. Recognize it as a native DSH Bundle via `cordis.patch.yml` and add it to `dsh.profile.bundles`.
-3. Automatically inject the OpenViking Status widget into the composer bar on next restart.
-
----
-
-### Option B: From GitHub Release Tarball
+In the DSH terminal:
 
 ```bash
-dsh plugin add https://github.com/dipertq/dsh-openviking-status/releases/download/v0.1.2/openviking-community-dsh-openviking-status-0.1.2.tgz
+dsh plugin add https://github.com/dipertq/dsh-openviking-status/releases/latest/download/dsh-openviking-status.tgz
 ```
 
----
+Then restart DSH Desktop. That is the whole procedure: DSH reads the package's
+`dsh.bundle.patch`, adds it to `dsh.profile.bundles` itself, and the chip appears
+in the composer bar.
 
-### Option C: Manual Configuration (Alternative)
+The link always resolves to the newest release, so it never goes stale. To pin a
+specific version, use its asset instead:
 
-If installing manually without `dsh plugin add`:
-
-1. Add to `~/.dsh/profiles/desktop/package.json`:
-
-```json
-"dependencies": {
-  "@openviking-community/dsh-openviking-status": "github:dipertq/dsh-openviking-status#v0.1.2"
-}
+```bash
+dsh plugin add https://github.com/dipertq/dsh-openviking-status/releases/download/v0.1.3/openviking-community-dsh-openviking-status-0.1.3.tgz
 ```
 
-2. Add to `~/.dsh/profiles/desktop/cordis.patch.yml`:
+### Why not `github:dipertq/...`?
+
+That form works, but costs an extra manual step. A `github:` spec makes pnpm
+build the package on your machine, and pnpm blocks build scripts until the
+package is allowlisted. The pnpm shipped with DSH Desktop (11.8.0) only matches
+a commit-pinned key, which changes on every push — so the entry has to be
+re-added for each new version:
 
 ```yaml
-- insert:
-    - id: openviking-status-ui
-      name: "@openviking-community/dsh-openviking-status"
+# ~/.dsh/profiles/desktop/pnpm-workspace.yaml
+allowBuilds:
+  "@openviking-community/dsh-openviking-status@https://codeload.github.com/dipertq/dsh-openviking-status/tar.gz/<commit-sha>": true
 ```
+
+The tarball ships `lib/` already compiled, so no build script runs and no
+allowlist entry is needed. See [ADR 0004](./docs/adr/0004-install-paths.md).
 
 ## Releases & CI/CD
 

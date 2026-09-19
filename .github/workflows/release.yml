@@ -48,13 +48,18 @@ jobs:
       - name: Build plugin bundles
         run: pnpm run build
 
+      # A packed tarball ships lib/ already built, so pnpm never runs the
+      # `prepare` script on install — which is why it needs no `allowBuilds`
+      # entry, unlike a `github:` spec. See docs/adr/0004-install-paths.md.
       - name: Prepare release artifacts
         run: |
           mkdir -p dist-release
-          # Pack tarball for npm / DSH plugin installation
           pnpm pack --pack-destination dist-release
-          # Package precompiled lib/ directory as standalone zip
-          zip -r dist-release/dsh-openviking-status-lib.zip lib README.md package.json
+          # Second copy under a version-free name. GitHub resolves
+          # /releases/latest/download/<name> to the newest release's asset with
+          # that exact name, which keeps the documented install command valid
+          # across releases instead of going stale on every bump.
+          cp dist-release/*.tgz dist-release/dsh-openviking-status.tgz
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
@@ -64,3 +69,18 @@ jobs:
           files: dist-release/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Optional: publishing to npm unlocks `dsh plugin add <name>` with no URL
+      # at all. Secrets are not readable from a step-level `if`, so the guard
+      # lives inside the script: without an NPM_TOKEN the step no-ops and the
+      # release still succeeds.
+      - name: Publish to npm
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NPM_TOKEN" ]; then
+            echo "NPM_TOKEN not set — skipping npm publish."
+            exit 0
+          fi
+          npm config set //registry.npmjs.org/:_authToken "$NPM_TOKEN"
+          npm publish --access public
