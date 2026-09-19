@@ -98,14 +98,12 @@ authenticates over OIDC with short-lived credentials, so there is no `NPM_TOKEN`
 secret to store or rotate, and each release carries a provenance attestation
 proving which commit and workflow built it.
 
-One-time setup, after the first version exists in the registry (trusted
-publishing is configured per package):
-
-1. Publish `0.1.5` once by hand: `npm publish --access public`.
-2. On the package's **Settings → Trusted Publisher** page, add a GitHub Actions
-   publisher: user `dipertq`, repository `dsh-openviking-status`, workflow
-   `release.yml`, environment blank.
-3. Cut releases as usual — the workflow publishes on its own.
+This is already configured, so a release needs nothing beyond the usual
+`pnpm run release:*`. The one-time setup was: publish the first version by hand
+(trusted publishing is configured per package, so the package has to exist),
+then register a GitHub Actions publisher on the package's
+**Settings → Trusted Publisher** page — user `dipertq`, repository
+`dsh-openviking-status`, workflow `release.yml`, environment blank.
 
 ## License
 

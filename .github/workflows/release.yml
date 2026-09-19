@@ -79,11 +79,16 @@ jobs:
       # provenance attestation automatically. Requires npm CLI >= 11.5.1, which
       # is newer than the one bundled with Node 22, hence the explicit upgrade.
       #
-      # Until the package's Trusted Publisher is configured on npmjs.com, this
-      # step fails; `continue-on-error` keeps the GitHub Release — already
-      # published above — from being held hostage by that.
+      # Publishing the same version twice is an error, and a re-run of a tag
+      # that already shipped would hit exactly that — so an existing version is
+      # treated as success while any other failure still fails the release.
       - name: Publish to npm (trusted publishing)
-        continue-on-error: true
         run: |
           npm install -g npm@latest
+          version=$(node -p "require('./package.json').version")
+          name=$(node -p "require('./package.json').name")
+          if npm view "$name@$version" version >/dev/null 2>&1; then
+            echo "$name@$version is already published — nothing to do."
+            exit 0
+          fi
           npm publish --access public
