@@ -1,10 +1,12 @@
 import { OpenVikingStatusChip } from "./OpenVikingStatusChip";
+import { OpenVikingSettingsSection } from "./OpenVikingSettingsSection";
 
 export * from "./api";
 export * from "./theme";
 export * from "./recallParser";
 export * from "./OpenVikingStatusChip";
 export * from "./OpenVikingStatusPopover";
+export * from "./OpenVikingSettingsSection";
 
 export type OpenVikingSessionData = import("./api").SessionStatus;
 export type OpenVikingHealth = import("./api").HealthStatus;
@@ -18,14 +20,10 @@ export const inject = ["slots"];
 /**
  * Точка входа клиентского плагина DSH.
  *
- * Занимает ячейку в `conversation.composer.dock` — списочном слоте строки
- * статистики под композером, где уже живут чипы вроде «24 turns 645 steps».
- * Там место пассивным показаниям; внутри композера чип читался как управляющий
- * элемент.
- *
- * Слот со скоупом сессии, поэтому `sessionId` и `useChat` приходят стандартными
- * пропами. Свой `id` обязателен: чужой занял бы и заменил ячейку соседа, а
- * `order` выше нуля ставит чип после штатной статистики.
+ * 1. Занимает ячейку в `conversation.composer.dock` — чип со статусом OpenViking
+ *    под композером чата.
+ * 2. Регистрирует раздел `settings.section` — страницу настроек OpenViking Status
+ *    в меню настроек DSH Desktop и Web.
  */
 export function apply(ctx: any) {
   ctx.effect(
@@ -42,5 +40,21 @@ export function apply(ctx: any) {
         )
       ),
     "openviking-status: composer stats chip"
+  );
+
+  ctx.effect(
+    () =>
+      ctx.slots.inject("settings.section", () =>
+        ctx.slots.register(
+          {
+            name: "settings.section",
+            id: "openviking-status",
+            order: 35,
+            label: () => "OpenViking",
+          },
+          OpenVikingSettingsSection
+        )
+      ),
+    "openviking-status: settings section"
   );
 }

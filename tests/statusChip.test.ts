@@ -299,44 +299,49 @@ describe("apply(ctx) Cordis Registration", () => {
   // стандартными пропами. Ячейка адресуется парой `name` + собственный `id`;
   // чужой `id` занял бы и заменил ячейку соседнего плагина.
   it("занимает собственную ячейку в conversation.composer.dock", () => {
-    let injectedSlot: string | null = null;
-    let registeredOptions: any = null;
-    let registeredComponent: any = null;
-    let effectLabel: string | null = null;
-    let cellDisposed = false;
+    const injectedSlots: string[] = [];
+    const registered: Array<{ options: any; component: any }> = [];
+    const effectLabels: string[] = [];
+    let disposedCount = 0;
 
     const mockCtx = {
       effect: (factory: () => () => void, label: string) => {
-        effectLabel = label;
+        effectLabels.push(label);
         const dispose = factory();
-        // Без disposer ячейка пережила бы выгрузку плагина.
         assert.strictEqual(typeof dispose, "function");
+        disposedCount++;
         dispose();
       },
       slots: {
         inject: (slotName: string, callback: () => () => void) => {
-          injectedSlot = slotName;
+          injectedSlots.push(slotName);
           return callback();
         },
         register: (options: any, component: any) => {
-          registeredOptions = options;
-          registeredComponent = component;
-          return () => {
-            cellDisposed = true;
-          };
+          registered.push({ options, component });
+          return () => {};
         },
       },
     };
 
     apply(mockCtx);
 
-    assert.strictEqual(injectedSlot, "conversation.composer.dock");
-    assert.strictEqual(registeredOptions.name, "conversation.composer.dock");
-    assert.strictEqual(registeredOptions.id, "openviking-status");
-    assert.strictEqual(typeof registeredOptions.order, "number");
-    assert.strictEqual(registeredComponent, OpenVikingStatusChip);
-    assert.ok(effectLabel);
-    assert.strictEqual(cellDisposed, true);
+    assert.ok(injectedSlots.includes("conversation.composer.dock"));
+    const dock = registered.find(
+      (r) => r.options.name === "conversation.composer.dock"
+    );
+    assert.ok(dock);
+    assert.strictEqual(dock!.options.id, "openviking-status");
+    assert.strictEqual(typeof dock!.options.order, "number");
+    assert.strictEqual(dock!.component, OpenVikingStatusChip);
+
+    const settings = registered.find(
+      (r) => r.options.name === "settings.section"
+    );
+    assert.ok(settings);
+    assert.strictEqual(settings!.options.id, "openviking-status");
+
+    assert.strictEqual(disposedCount, 2);
   });
 });
 

@@ -7,6 +7,12 @@ settings:
 importers:
   .:
     devDependencies:
+      "@deepseek-ai/schemastery":
+        specifier: ^3.18.2
+        version: 3.18.2
+      "@types/node":
+        specifier: ^26.6.2
+        version: 26.6.2
       "@types/react":
         specifier: ^18.3.18
         version: 18.3.31
@@ -36,6 +42,18 @@ importers:
         version: 5.9.3
 
 packages:
+  "@deepseek-ai/cosmokit@1.8.3":
+    resolution:
+      {
+        integrity: sha512-qBo+ronVM6Eu2WNVJXi8JcMiqZ19T9BRIpV+5qJUFPXjGH/Z0QKcQMC/IZJ7L394YTOtJgcovbk9qP0w2GsBXQ==,
+      }
+
+  "@deepseek-ai/schemastery@3.18.2":
+    resolution:
+      {
+        integrity: sha512-njDtZsznjYxok7KLLlHOPyuv2efdWVbSflAHgztSfbMsg+CVraEoRe2DjOCgClYv3ZCSm7WXoaUkbB/+RY7tWQ==,
+      }
+
   "@esbuild/aix-ppc64@0.27.7":
     resolution:
       {
@@ -518,10 +536,22 @@ packages:
     cpu: [x64]
     os: [win32]
 
+  "@standard-schema/spec@1.1.0":
+    resolution:
+      {
+        integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==,
+      }
+
   "@types/estree@1.0.9":
     resolution:
       {
         integrity: sha512-GhdPgy1el4/ImP05X05Uw4cw2/M93BCUmnEvWZNStlCzEKME4Fkk+YpoA5OiHNQmoS7Cafb8Xa3Pya8m1Qrzeg==,
+      }
+
+  "@types/node@26.6.2":
+    resolution:
+      {
+        integrity: sha512-X1P21scMv4zGKLYqjdGjaKa7COa0RKVYYZZN/NfvLQ1JegxFhdhpZG/Lyn8AXx6CDUavKAd11v6BvfpkDByK8g==,
       }
 
   "@types/prop-types@15.7.15":
@@ -948,6 +978,12 @@ packages:
         integrity: sha512-JFNbkD1Svwe0KvGi8GOeLcP4kAWQ609twvCdcHxq1oSL8svv39ZuSvajcD8B+5D0eL4+s1Is2D/O6KN3qcTeRA==,
       }
 
+  undici-types@8.9.0:
+    resolution:
+      {
+        integrity: sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg==,
+      }
+
   yaml@2.9.1:
     resolution:
       {
@@ -957,6 +993,13 @@ packages:
     hasBin: true
 
 snapshots:
+  "@deepseek-ai/cosmokit@1.8.3": {}
+
+  "@deepseek-ai/schemastery@3.18.2":
+    dependencies:
+      "@deepseek-ai/cosmokit": 1.8.3
+      "@standard-schema/spec": 1.1.0
+
   "@esbuild/aix-ppc64@0.27.7":
     optional: true
 
@@ -1127,7 +1170,13 @@ snapshots:
   "@rollup/rollup-win32-x64-msvc@4.63.4":
     optional: true
 
+  "@standard-schema/spec@1.1.0": {}
+
   "@types/estree@1.0.9": {}
+
+  "@types/node@26.6.2":
+    dependencies:
+      undici-types: 8.9.0
 
   "@types/prop-types@15.7.15": {}
 
@@ -1391,6 +1440,8 @@ snapshots:
   typescript@5.9.3: {}
 
   ufo@1.6.4: {}
+
+  undici-types@8.9.0: {}
 
   yaml@2.9.1:
     optional: true

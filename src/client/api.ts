@@ -144,13 +144,43 @@ export function resolveApiKey(apiKey?: string): string | undefined {
  * Клиент REST API для взаимодействия с сессиями демона OpenViking
  */
 export class OpenVikingClient {
-  readonly endpoint: string;
-  readonly apiKey?: string;
+  endpoint: string;
+  apiKey?: string;
   private resolvedSessionIds = new Map<string, string>();
 
   constructor(endpoint?: string, apiKey?: string) {
     this.endpoint = resolveEndpoint(endpoint);
     this.apiKey = resolveApiKey(apiKey);
+  }
+
+  /**
+   * Обновление конфигурации клиента на лету (например, после сохранения настроек в UI).
+   */
+  updateConfig(config: { endpoint?: string; apiKey?: string }): void {
+    if (config.endpoint && config.endpoint.trim()) {
+      this.endpoint = resolveEndpoint(config.endpoint);
+    }
+    if (config.apiKey !== undefined) {
+      this.apiKey = resolveApiKey(config.apiKey);
+    }
+    this.resolvedSessionIds.clear();
+  }
+
+  /**
+   * Очистить кэш разрешенных идентификаторов сессий.
+   */
+  clearResolvedSessions(): void {
+    this.resolvedSessionIds.clear();
+  }
+
+  /**
+   * Проверка, работает ли клиент через DSH Web Server proxy.
+   */
+  private isProxy(): boolean {
+    return (
+      this.endpoint.startsWith("/") ||
+      this.endpoint.includes("/openviking-status/api")
+    );
   }
 
   /**
@@ -206,6 +236,45 @@ export class OpenVikingClient {
    * Проверка доступности и состояния сервиса OpenViking
    */
   async checkHealth(): Promise<HealthStatus> {
+    if (this.isProxy()) {
+      try {
+        const res = await fetch(`${this.endpoint}/health`, {
+          method: "GET",
+          headers: this.getHeaders(),
+        });
+
+        if (!res.ok) {
+          return {
+            ok: false,
+            error: `HTTP ${res.status}: ${res.statusText}`,
+          };
+        }
+
+        const body = (await res.json().catch(() => ({}))) as Record<
+          string,
+          unknown
+        >;
+        const isOk =
+          body.ok !== false &&
+          body.status !== "error" &&
+          (body.ok === true ||
+            body.status === "ok" ||
+            body.status === "healthy" ||
+            res.ok);
+
+        return {
+          ok: isOk,
+          version: typeof body.version === "string" ? body.version : undefined,
+          storage: typeof body.storage === "string" ? body.storage : undefined,
+        };
+      } catch (err) {
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
+    }
+
     try {
       const res = await fetch(`${this.endpoint}/health`, {
         method: "GET",
@@ -255,6 +324,52 @@ export class OpenVikingClient {
   async readSession(sessionId: string): Promise<SessionReadResult> {
     if (!sessionId || !sessionId.trim()) {
       return { status: "missing" };
+    }
+
+    if (this.isProxy()) {
+      try {
+        const res = await fetch(
+          `${this.endpoint}/session?id=${encodeURIComponent(sessionId.trim())}`,
+          {
+            method: "GET",
+            headers: this.getHeaders(),
+          }
+        );
+
+        if (res.status === 401 || res.status === 403) {
+          return { status: "unauthorized" };
+        }
+
+        if (!res.ok) {
+          return { status: "error", detail: `HTTP ${res.status}` };
+        }
+
+        const data = (await res.json()) as Record<string, unknown>;
+        if (data.status === "unauthorized") return { status: "unauthorized" };
+        if (data.status === "missing") return { status: "missing" };
+        if (data.status === "unreachable")
+          return {
+            status: "unreachable",
+            detail: typeof data.detail === "string" ? data.detail : undefined,
+          };
+        if (data.status === "error")
+          return {
+            status: "error",
+            detail: typeof data.detail === "string" ? data.detail : undefined,
+          };
+        if (data.status === "ok" && data.session) {
+          return {
+            status: "ok",
+            session: data.session as SessionStatus,
+          };
+        }
+        return { status: "error", detail: "malformed response from proxy" };
+      } catch (err) {
+        return {
+          status: "unreachable",
+          detail: err instanceof Error ? err.message : String(err),
+        };
+      }
     }
 
     const candidates = this.getCandidateSessionIds(sessionId);
@@ -360,6 +475,37 @@ export class OpenVikingClient {
   ): Promise<CommitResult> {
     if (!sessionId || !sessionId.trim()) {
       return { ok: false, error: "Missing sessionId" };
+    }
+
+    if (this.isProxy()) {
+      try {
+        const res = await fetch(`${this.endpoint}/session/commit`, {
+          method: "POST",
+          headers: this.getHeaders(),
+          body: JSON.stringify({
+            sessionId: sessionId.trim(),
+            ...(options ?? { keep_recent_count: 10 }),
+          }),
+        });
+
+        if (!res.ok) {
+          return { ok: false, error: `HTTP ${res.status}` };
+        }
+
+        const data = (await res.json().catch(() => ({}))) as Record<
+          string,
+          unknown
+        >;
+        return {
+          ok: data.ok === true,
+          error: typeof data.error === "string" ? data.error : undefined,
+        };
+      } catch (err) {
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
     }
 
     const candidates = this.getCandidateSessionIds(sessionId);

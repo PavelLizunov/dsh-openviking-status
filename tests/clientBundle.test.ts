@@ -91,7 +91,7 @@ test("фабрика бандла отдаёт контракт плагина C
   assert.equal(typeof exports.OpenVikingStatusChip, "function");
 });
 
-test("apply занимает ячейку conversation.composer.dock", () => {
+test("apply занимает ячейки conversation.composer.dock и settings.section", () => {
   const registration = loadBundle();
   const exports = registration.factory((specifier) =>
     nodeRequire(specifier)
@@ -99,7 +99,7 @@ test("apply занимает ячейку conversation.composer.dock", () => {
 
   const injected: string[] = [];
   const registered: Array<Record<string, unknown>> = [];
-  let disposed = false;
+  let disposeCount = 0;
 
   const ctx = {
     effect(factory: () => () => void) {
@@ -109,7 +109,7 @@ test("apply занимает ячейку conversation.composer.dock", () => {
         "function",
         "эффект обязан вернуть disposer, иначе ячейка переживёт выгрузку плагина"
       );
-      disposed = true;
+      disposeCount++;
       dispose();
     },
     slots: {
@@ -126,15 +126,25 @@ test("apply занимает ячейку conversation.composer.dock", () => {
 
   (exports.apply as (ctx: unknown) => void)(ctx);
 
-  assert.deepEqual(injected, ["conversation.composer.dock"]);
-  assert.equal(registered.length, 1);
-  assert.equal(registered[0]!.name, "conversation.composer.dock");
-  // Свой id: чужой занял бы и заменил ячейку соседнего плагина — штатная
-  // статистика DSH сидит в этом же слоте под id "stats".
-  assert.equal(registered[0]!.id, "openviking-status");
-  assert.ok(
-    (registered[0]!.order as number) > 0,
-    "order обязан быть выше нуля, иначе чип встанет перед штатной статистикой"
+  assert.deepEqual(injected, [
+    "conversation.composer.dock",
+    "settings.section",
+  ]);
+  assert.equal(registered.length, 2);
+
+  // 1. conversation.composer.dock
+  const dockEntry = registered.find(
+    (r) => r.name === "conversation.composer.dock"
   );
-  assert.equal(disposed, true);
+  assert.ok(dockEntry, "должен зарегистрировать conversation.composer.dock");
+  assert.equal(dockEntry!.id, "openviking-status");
+  assert.ok((dockEntry!.order as number) > 0);
+
+  // 2. settings.section
+  const settingsEntry = registered.find((r) => r.name === "settings.section");
+  assert.ok(settingsEntry, "должен зарегистрировать settings.section");
+  assert.equal(settingsEntry!.id, "openviking-status");
+  assert.ok((settingsEntry!.order as number) > 0);
+
+  assert.equal(disposeCount, 2);
 });

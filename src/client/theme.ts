@@ -47,6 +47,11 @@ export const THEME = {
   /** Утопленная поверхность: дорожка прогресс-бара. */
   insetSurface: "--dsw-alias-bg-layer-2",
 
+  /** Заливка основной кнопки действий. */
+  buttonPrimaryFill: "--dsw-alias-button-primary-fill",
+  /** Цвет текста на основной кнопке действий. */
+  buttonPrimaryText: "--dsw-alias-label-primary-inverted",
+
   /** Моноширинный шрифт для идентификаторов и путей. */
   fontMono: "--dsw-font-markdown-code-font-family",
 } as const;
