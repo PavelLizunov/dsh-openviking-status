@@ -19,22 +19,23 @@ See [CONTEXT.md](./CONTEXT.md), [ADR 0001](./docs/adr/0001-client-ui-widget.md),
 
 ### Release tarball (recommended)
 
-In the DSH terminal:
+In the DSH terminal, using the current version:
 
 ```bash
-dsh plugin add https://github.com/dipertq/dsh-openviking-status/releases/latest/download/dsh-openviking-status.tgz
+dsh plugin add https://github.com/dipertq/dsh-openviking-status/releases/download/v0.1.4/openviking-community-dsh-openviking-status-0.1.4.tgz
 ```
 
 Then restart DSH Desktop. That is the whole procedure: DSH reads the package's
 `dsh.bundle.patch`, adds it to `dsh.profile.bundles` itself, and the chip appears
 in the composer bar.
 
-The link always resolves to the newest release, so it never goes stale. To pin a
-specific version, use its asset instead:
-
-```bash
-dsh plugin add https://github.com/dipertq/dsh-openviking-status/releases/download/v0.1.3/openviking-community-dsh-openviking-status-0.1.3.tgz
-```
+Use a **version-pinned** URL, as above. The
+`/releases/latest/download/…` form resolves to the newest release, but its
+content changes under a fixed URL, so pnpm records no `integrity` for it and
+every later `pnpm install` in that profile fails with
+`ERR_PNPM_MISSING_TARBALL_INTEGRITY`. Pick the newest version from the
+[releases page](https://github.com/dipertq/dsh-openviking-status/releases) and
+re-run the command to upgrade.
 
 ### Why not `github:dipertq/...`?
 

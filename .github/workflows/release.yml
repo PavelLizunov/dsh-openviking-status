@@ -51,15 +51,14 @@ jobs:
       # A packed tarball ships lib/ already built, so pnpm never runs the
       # `prepare` script on install — which is why it needs no `allowBuilds`
       # entry, unlike a `github:` spec. See docs/adr/0004-install-paths.md.
+      # Only the versioned tarball is published. A version-free copy served via
+      # /releases/latest/download/ would change content under a fixed URL, so
+      # pnpm records no `integrity` for it and every later `pnpm install` in the
+      # user's profile fails with ERR_PNPM_MISSING_TARBALL_INTEGRITY.
       - name: Prepare release artifacts
         run: |
           mkdir -p dist-release
           pnpm pack --pack-destination dist-release
-          # Second copy under a version-free name. GitHub resolves
-          # /releases/latest/download/<name> to the newest release's asset with
-          # that exact name, which keeps the documented install command valid
-          # across releases instead of going stale on every bump.
-          cp dist-release/*.tgz dist-release/dsh-openviking-status.tgz
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2

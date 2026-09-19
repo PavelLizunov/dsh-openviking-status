@@ -59,14 +59,20 @@ Releases are automated via GitHub Actions:
    - Minor release (new backward-compatible features): `pnpm run release:minor`
    - Major release (breaking architectural changes): `pnpm run release:major`
    - Or manually: `git tag vX.Y.Z && git push origin vX.Y.Z`
-4. **Recommend the release tarball, never `github:`.** A `github:` spec makes
-   pnpm run `prepare` on the user's machine, and the pnpm bundled with DSH
-   Desktop (11.8.0) blocks that until a _commit-pinned_ `allowBuilds` key is
-   added — a key that changes on every push. The packed tarball ships `lib/`
-   pre-built, so no build script runs and no allowlist entry is needed. The
-   documented link is `/releases/latest/download/dsh-openviking-status.tgz`,
-   a version-free asset the release workflow publishes alongside the versioned
-   one. Details and the experiment in `docs/adr/0004-install-paths.md`.
+4. **Recommend the release tarball at a _version-pinned_ URL.** Two traps, both
+   verified by experiment (see `docs/adr/0004-install-paths.md`):
+   - A `github:` spec makes pnpm run `prepare` on the user's machine, and the
+     pnpm bundled with DSH Desktop (11.8.0) blocks that until a commit-pinned
+     `allowBuilds` key is added — a key that changes on every push. The packed
+     tarball ships `lib/` pre-built, so no build script runs.
+   - Never point users at `/releases/latest/download/…`. Its content changes
+     under a fixed URL, so pnpm stores no `integrity` and every _later_
+     `pnpm install` in that profile dies with
+     `ERR_PNPM_MISSING_TARBALL_INTEGRITY`. The first install succeeds, which is
+     what makes this one easy to ship by accident.
+
+   When bumping the version, update the URL in `README.md` too.
+
 5. Never manually add a package to `dsh.profile.bundles` if its `package.json` does not declare `dsh.bundle.patch` — doing so will trigger DSH Recovery Mode.
 6. Never push a tag on a broken or unverified branch.
 7. See `docs/adr/0002-release-workflow.md` for the architectural decision record.
