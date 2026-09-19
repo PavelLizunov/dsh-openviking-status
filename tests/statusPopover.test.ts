@@ -11,6 +11,8 @@ import {
   formatEndpoint,
   truncateSessionId,
   handleEscapeKey,
+  formatDaemonVersion,
+  themeVar,
   COMMIT_THRESHOLD,
 } from "../lib/client.js";
 
@@ -42,34 +44,35 @@ describe("getProgressBarPercent", () => {
 });
 
 describe("getProgressBarColor", () => {
-  it("returns success green when percentage is below 80%", () => {
-    assert.strictEqual(
-      getProgressBarColor(0),
-      "var(--dsw-status-success, #34d399)"
-    );
-    assert.strictEqual(
-      getProgressBarColor(50),
-      "var(--dsw-status-success, #34d399)"
-    );
-    assert.strictEqual(
-      getProgressBarColor(79),
-      "var(--dsw-status-success, #34d399)"
-    );
+  // Конкретные имена свойств проверяет tests/theme.test.ts; здесь важен только
+  // выбор роли по заполненности.
+  it("returns the success colour below 80%", () => {
+    assert.strictEqual(getProgressBarColor(0), themeVar("stateSuccess"));
+    assert.strictEqual(getProgressBarColor(50), themeVar("stateSuccess"));
+    assert.strictEqual(getProgressBarColor(79), themeVar("stateSuccess"));
   });
 
-  it("returns warning yellow/amber when percentage is 80% or above", () => {
-    assert.strictEqual(
-      getProgressBarColor(80),
-      "var(--dsw-status-warning, #fbbf24)"
-    );
-    assert.strictEqual(
-      getProgressBarColor(95),
-      "var(--dsw-status-warning, #fbbf24)"
-    );
-    assert.strictEqual(
-      getProgressBarColor(100),
-      "var(--dsw-status-warning, #fbbf24)"
-    );
+  it("returns the warning colour at 80% or above", () => {
+    assert.strictEqual(getProgressBarColor(80), themeVar("stateWarning"));
+    assert.strictEqual(getProgressBarColor(95), themeVar("stateWarning"));
+    assert.strictEqual(getProgressBarColor(100), themeVar("stateWarning"));
+  });
+});
+
+describe("formatDaemonVersion", () => {
+  // Демон отдаёт версию уже с префиксом; собственный `v` сверху давал
+  // `ONLINE vv0.4.20`. Нормализация переживает оба соглашения демона.
+  it("leaves an already prefixed version alone", () => {
+    assert.strictEqual(formatDaemonVersion("v0.4.20"), "v0.4.20");
+  });
+
+  it("prefixes a bare version", () => {
+    assert.strictEqual(formatDaemonVersion("0.4.20"), "v0.4.20");
+  });
+
+  it("returns undefined for missing or blank input", () => {
+    assert.strictEqual(formatDaemonVersion(undefined), undefined);
+    assert.strictEqual(formatDaemonVersion("  "), undefined);
   });
 });
 
@@ -228,7 +231,13 @@ describe("OpenVikingStatusPopover Component Rendering", () => {
     assert.ok(html.includes("OpenViking Memory"));
     assert.ok(html.includes("127.0.0.1:1933"));
     assert.ok(html.includes("ONLINE v0.2.1"));
-    assert.ok(html.includes("var(--dsw-status-success, #34d399)"));
+    assert.ok(html.includes(themeVar("stateSuccess")));
+    // Фон панели обязан быть свойством темы: именно подстановка несуществующего
+    // имени когда-то красила панель в синий fallback.
+    assert.ok(
+      html.includes(themeVar("panelSurface")),
+      "панель обязана использовать поверхность меню DSH"
+    );
   });
 
   it("renders header with OFFLINE badge when health.ok is false", () => {
@@ -241,7 +250,7 @@ describe("OpenVikingStatusPopover Component Rendering", () => {
     );
 
     assert.ok(html.includes("OFFLINE"));
-    assert.ok(html.includes("var(--dsw-status-error, #f87171)"));
+    assert.ok(html.includes(themeVar("stateError")));
   });
 
   it("renders session details: truncated ID, peer ID, and relative last commit", () => {
@@ -296,7 +305,7 @@ describe("OpenVikingStatusPopover Component Rendering", () => {
 
     assert.ok(html.includes("8,000 / 20,000"));
     assert.ok(html.includes("width:40%"));
-    assert.ok(html.includes("var(--dsw-status-success, #34d399)"));
+    assert.ok(html.includes(themeVar("stateSuccess")));
   });
 
   it("renders progress bar with yellow/amber color when at or above 80%", () => {
@@ -313,7 +322,7 @@ describe("OpenVikingStatusPopover Component Rendering", () => {
 
     assert.ok(html.includes("17,000 / 20,000"));
     assert.ok(html.includes("width:85%"));
-    assert.ok(html.includes("var(--dsw-status-warning, #fbbf24)"));
+    assert.ok(html.includes(themeVar("stateWarning")));
   });
 
   it("renders empty memories message when no memories recalled", () => {
@@ -517,5 +526,58 @@ describe("OpenVikingStatusPopover Component Rendering", () => {
     };
     cleanup();
     assert.strictEqual(timerCleared, true);
+  });
+
+  it("renders no emoji anywhere in the panel", () => {
+    const html = renderToString(
+      React.createElement(OpenVikingStatusPopover, {
+        sessionId: "session-no-emoji",
+        health: { ok: true, version: "v0.4.20" },
+        sessionData: {
+          session_id: "session-no-emoji",
+          pending_tokens: 4433,
+          peer_id: "pet/dsh-plugins",
+          last_commit_at: new Date().toISOString(),
+        },
+        recalledResult: {
+          recalledCount: 1,
+          items: [
+            {
+              uri: "viking://user/dsh/memories/preferences/user/code_style.md",
+              category: "preferences",
+              source: "recall",
+            },
+          ],
+          profileItems: [],
+          recallItems: [],
+        },
+      })
+    );
+
+    assert.strictEqual(
+      html.match(/\p{Extended_Pictographic}/gu),
+      null,
+      `эмодзи зависят от платформенного шрифта: ${html}`
+    );
+  });
+
+  it("states why counters are missing instead of showing zero", () => {
+    const html = renderToString(
+      React.createElement(OpenVikingStatusPopover, {
+        sessionId: "session-unauthorised",
+        health: { ok: true, version: "v0.4.20" },
+        sessionData: null,
+        sessionRead: { status: "unauthorized" },
+      })
+    );
+
+    assert.ok(
+      html.includes("API key"),
+      `панель обязана назвать причину: ${html}`
+    );
+    assert.ok(
+      !html.includes("0 / 20,000"),
+      `нечитаемая сессия не должна выглядеть как нулевое накопление: ${html}`
+    );
   });
 });

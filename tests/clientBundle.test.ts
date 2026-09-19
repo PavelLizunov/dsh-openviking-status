@@ -91,7 +91,7 @@ test("фабрика бандла отдаёт контракт плагина C
   assert.equal(typeof exports.OpenVikingStatusChip, "function");
 });
 
-test("apply занимает ячейку conversation.input.right", () => {
+test("apply занимает ячейку conversation.composer.dock", () => {
   const registration = loadBundle();
   const exports = registration.factory((specifier) =>
     nodeRequire(specifier)
@@ -126,9 +126,15 @@ test("apply занимает ячейку conversation.input.right", () => {
 
   (exports.apply as (ctx: unknown) => void)(ctx);
 
-  assert.deepEqual(injected, ["conversation.input.right"]);
+  assert.deepEqual(injected, ["conversation.composer.dock"]);
   assert.equal(registered.length, 1);
-  assert.equal(registered[0]!.name, "conversation.input.right");
+  assert.equal(registered[0]!.name, "conversation.composer.dock");
+  // Свой id: чужой занял бы и заменил ячейку соседнего плагина — штатная
+  // статистика DSH сидит в этом же слоте под id "stats".
   assert.equal(registered[0]!.id, "openviking-status");
+  assert.ok(
+    (registered[0]!.order as number) > 0,
+    "order обязан быть выше нуля, иначе чип встанет перед штатной статистикой"
+  );
   assert.equal(disposed, true);
 });

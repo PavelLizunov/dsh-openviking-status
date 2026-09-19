@@ -7,6 +7,7 @@ import {
   OpenVikingStatusChip,
   OpenVikingStatusPopover,
   parseRecalledMemories,
+  themeVar,
 } from "../lib/client.js";
 import type { SessionStatus, HealthStatus } from "../src/client/api";
 
@@ -213,8 +214,8 @@ Here is the requested information regarding conventions and tools...
       "Chip must display 'OV:' indicator when online"
     );
     assert.ok(
-      chipHtml.includes("var(--dsw-status-success, #34d399)"),
-      "Status indicator dot must have success green color"
+      chipHtml.includes(themeVar("stateSuccess")),
+      "Status indicator dot must take its colour from the theme"
     );
     assert.ok(
       chipHtml.includes(
@@ -539,8 +540,8 @@ Here is the requested information regarding conventions and tools...
       "Offline chip must display 'offline'"
     );
     assert.ok(
-      offlineChipHtml.includes("var(--dsw-status-error, #f87171)"),
-      "Status indicator dot must be red in offline state"
+      offlineChipHtml.includes(themeVar("stateError")),
+      "Status indicator dot must use the theme's error colour when offline"
     );
     assert.ok(
       offlineChipHtml.includes("OFFLINE"),

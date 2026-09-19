@@ -1,12 +1,41 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { HealthStatus, SessionStatus } from "./api";
+import { HealthStatus, SessionStatus, SessionReadResult } from "./api";
+import { themeVar } from "./theme";
 import { RecalledMemoriesResult, RecalledMemoryItem } from "./recallParser";
 import { COMMIT_THRESHOLD } from "./OpenVikingStatusChip";
+
+/**
+ * `require`, который модульная система DSH передаёт фабрике бандла. Объявлен
+ * здесь, потому что пакет собирается для браузера и типов Node не подключает.
+ */
+declare const require: ((specifier: string) => any) | undefined;
+
+/**
+ * Иконки DSH, доступные клиентскому плагину.
+ *
+ * Зависимости приходят через `require` внутри фабрики бандла — тем же путём,
+ * что и react. Если пакет почему-то недоступен, иконка молча опускается:
+ * отсутствие декоративного глифа лучше сломанной панели.
+ */
+function dshIcon(name: string): React.ComponentType<{ size?: number }> | null {
+  try {
+    const primitives =
+      typeof require === "function"
+        ? require("@deepseek-ai/dsh-client-ui-primitives")
+        : null;
+    const icon = primitives?.[name];
+    return typeof icon === "function" ? icon : null;
+  } catch {
+    return null;
+  }
+}
 
 export interface OpenVikingStatusPopoverProps {
   sessionId: string;
   health: HealthStatus | null;
   sessionData: SessionStatus | null;
+  /** Исход чтения сессии: отличает «нет доступа» от «накоплено ноль». */
+  sessionRead?: SessionReadResult | null;
   recalledResult?: RecalledMemoriesResult;
   endpoint?: string;
   isCommitting?: boolean;
@@ -30,15 +59,26 @@ export function getProgressBarPercent(
 }
 
 /**
- * Цветовой сдвиг шкалы токенов:
- * - зеленый (< 80%)
- * - желтый / янтарный (>= 80%)
+ * Цветовой сдвиг шкалы токенов: предупреждение при приближении к порогу.
  */
 export function getProgressBarColor(percent: number): string {
   if (percent >= 80) {
-    return "var(--dsw-status-warning, #fbbf24)";
+    return themeVar("stateWarning");
   }
-  return "var(--dsw-status-success, #34d399)";
+  return themeVar("stateSuccess");
+}
+
+/**
+ * Версия демона для показа в бейдже.
+ *
+ * OpenViking отдаёт `version` уже с префиксом (`v0.4.20`), а собственный `v`
+ * сверху давал `vv0.4.20`. Нормализуем, а не срезаем: префикс добавляется
+ * только если его нет, поэтому оба соглашения демона выглядят одинаково.
+ */
+export function formatDaemonVersion(version?: string): string | undefined {
+  const value = version?.trim();
+  if (!value) return undefined;
+  return /^v/i.test(value) ? value : `v${value}`;
 }
 
 /**
@@ -71,9 +111,6 @@ export function formatRelativeTime(
 
 /**
  * Извлечение имени конечного файла или относительного пути из viking:// URI.
- * Например:
- * viking://user/dsh/memories/preferences/user/code_style.md -> user/code_style.md
- * viking://user/dsh/memories/entities/project/wrench_board.md -> project/wrench_board.md
  */
 export function formatMemoryLeafName(uri: string): string {
   if (!uri) return "";
@@ -90,7 +127,7 @@ export function formatMemoryLeafName(uri: string): string {
 }
 
 /**
- * Форматирование адреса эндпоинта для отображения (удаляет протокол http:// / https://).
+ * Форматирование адреса эндпоинта для отображения (удаляет протокол).
  */
 export function formatEndpoint(endpoint?: string): string {
   if (!endpoint || !endpoint.trim()) {
@@ -109,41 +146,13 @@ export function truncateSessionId(id: string, maxLen: number = 16): string {
 }
 
 /**
- * Получение стилей бейджа категории воспоминания.
+ * Стиль бейджа категории.
+ *
+ * Эталонная панель DSH не кодирует категории цветом, а подходящих цветовых
+ * свойств тема не объявляет — поэтому все бейджи одинаковые и приглушённые.
  */
-export function getCategoryBadgeStyle(category?: string): React.CSSProperties {
-  switch (category?.toLowerCase()) {
-    case "preferences":
-      return {
-        backgroundColor: "rgba(168, 85, 247, 0.15)",
-        color: "var(--dsw-status-purple, #c084fc)",
-      };
-    case "entities":
-      return {
-        backgroundColor: "rgba(59, 130, 246, 0.15)",
-        color: "var(--dsw-status-info, #60a5fa)",
-      };
-    case "skills":
-      return {
-        backgroundColor: "rgba(236, 72, 153, 0.15)",
-        color: "var(--dsw-status-pink, #f472b6)",
-      };
-    case "events":
-      return {
-        backgroundColor: "rgba(245, 158, 11, 0.15)",
-        color: "var(--dsw-status-warning, #fbbf24)",
-      };
-    case "resources":
-      return {
-        backgroundColor: "rgba(20, 184, 166, 0.15)",
-        color: "var(--dsw-status-teal, #2dd4bf)",
-      };
-    default:
-      return {
-        backgroundColor: "rgba(148, 163, 184, 0.15)",
-        color: "var(--dsw-text-muted, #94a3b8)",
-      };
-  }
+export function getCategoryBadgeStyle(_category?: string): React.CSSProperties {
+  return { color: themeVar("labelTertiary") };
 }
 
 /**
@@ -162,11 +171,15 @@ export function handleEscapeKey(
 
 /**
  * Панель детального состояния контекстной памяти OpenViking (Status Popover).
+ *
+ * Оформление повторяет диалог статистики сессии DSH: та же поверхность, тень,
+ * радиус, отступы и кегль.
  */
 export function OpenVikingStatusPopover({
   sessionId,
   health,
   sessionData,
+  sessionRead,
   recalledResult,
   endpoint,
   isCommitting = false,
@@ -189,9 +202,15 @@ export function OpenVikingStatusPopover({
   }, []);
 
   const isOnline = health?.ok === true;
+  const sessionUnreadable =
+    isOnline && sessionRead != null && sessionRead.status !== "ok";
+  const unauthorized = sessionRead?.status === "unauthorized";
+
   const statusColor = isOnline
-    ? "var(--dsw-status-success, #34d399)"
-    : "var(--dsw-status-error, #f87171)";
+    ? sessionUnreadable
+      ? themeVar("stateWarning")
+      : themeVar("stateSuccess")
+    : themeVar("stateError");
 
   const displaySessionId = sessionData?.session_id || sessionId || "";
   const pendingTokens = sessionData?.pending_tokens ?? 0;
@@ -200,6 +219,9 @@ export function OpenVikingStatusPopover({
 
   const memoryItems: RecalledMemoryItem[] = recalledResult?.items || [];
   const recalledCount = recalledResult?.recalledCount ?? memoryItems.length;
+
+  const CopyIcon = dshIcon("IconCopyOutline16");
+  const CheckIcon = dshIcon("IconCheckOutline16");
 
   const handleCopySessionId = useCallback(() => {
     if (!displaySessionId) return;
@@ -216,7 +238,21 @@ export function OpenVikingStatusPopover({
     }
   }, [displaySessionId]);
 
-  const isCommitDisabled = isCommitting || !isOnline || pendingTokens === 0;
+  const isCommitDisabled =
+    isCommitting || !isOnline || sessionUnreadable || pendingTokens === 0;
+
+  /** Подпись в строке «Pending Tokens». */
+  const pendingLabel = sessionUnreadable
+    ? "unavailable"
+    : `${pendingTokens.toLocaleString()} / ${COMMIT_THRESHOLD.toLocaleString()}`;
+
+  const rowStyle: React.CSSProperties = {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+  };
+  const mutedStyle: React.CSSProperties = { color: themeVar("labelTertiary") };
+  const monoStyle: React.CSSProperties = { fontFamily: themeVar("fontMono") };
 
   return (
     <div
@@ -227,74 +263,62 @@ export function OpenVikingStatusPopover({
         position: "absolute",
         bottom: "calc(100% + 8px)",
         right: 0,
-        width: "320px",
-        backgroundColor: "var(--dsw-surface-overlay, #1e293b)",
-        border: "1px solid var(--dsw-border-default, #334155)",
-        borderRadius: "8px",
-        padding: "12px",
-        boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.5)",
-        zIndex: 1000,
-        fontSize: "12px",
-        color: "var(--dsw-text-default, #f1f5f9)",
-        fontFamily: "var(--dsw-font-sans, system-ui, sans-serif)",
+        zIndex: 1100,
         boxSizing: "border-box",
+        width: "max-content",
+        minWidth: "min(300px, 100vw - 24px)",
+        maxWidth: "min(440px, 100vw - 24px)",
+        background: themeVar("panelSurface"),
+        boxShadow: themeVar("panelElevation"),
+        color: themeVar("labelSecondary"),
+        cursor: "default",
+        border: 0,
+        borderRadius: "12px",
+        padding: "16px",
+        fontSize: "12px",
+        lineHeight: "18px",
+        ...({
+          "--dsw-elevation-stroke-color": themeVar("panelStroke"),
+        } as React.CSSProperties),
         ...style,
       }}
     >
       <style>{`@keyframes ov-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
-      {/* Header: Title, Endpoint, Status Badge */}
+
+      {/* Заголовок: название, эндпоинт, бейдж состояния */}
       <div
         style={{
           display: "flex",
           justifyContent: "space-between",
-          alignItems: "flex-start",
-          marginBottom: "10px",
-          paddingBottom: "8px",
-          borderBottom:
-            "1px solid var(--dsw-border-subtle, rgba(255, 255, 255, 0.08))",
+          gap: "16px",
+          marginBottom: "8px",
+          color: themeVar("labelPrimary"),
+          fontWeight: 500,
         }}
       >
-        <div>
-          <div
-            style={{
-              fontWeight: 600,
-              fontSize: "13px",
-              color: "var(--dsw-text-default, #f1f5f9)",
-            }}
-          >
-            OpenViking Memory
-          </div>
-          <div
+        <span style={{ minWidth: 0 }}>
+          OpenViking Memory{" "}
+          <span
             data-testid="endpoint-label"
-            style={{
-              fontSize: "10px",
-              color: "var(--dsw-text-muted, #94a3b8)",
-              fontFamily: "var(--dsw-font-mono, monospace)",
-              marginTop: "1px",
-            }}
+            style={{ ...mutedStyle, ...monoStyle, fontWeight: 400 }}
           >
             {formatEndpoint(endpoint)}
-          </div>
-        </div>
+          </span>
+        </span>
 
-        <div
+        <span
           data-testid="status-badge"
           style={{
             display: "inline-flex",
             alignItems: "center",
-            gap: "5px",
-            fontSize: "10px",
-            padding: "2px 7px",
-            borderRadius: "4px",
-            backgroundColor: isOnline
-              ? "rgba(52, 211, 153, 0.15)"
-              : "rgba(248, 113, 113, 0.15)",
+            gap: "6px",
             color: statusColor,
-            fontWeight: 600,
+            flexShrink: 0,
           }}
         >
           <span
             data-testid="status-badge-dot"
+            aria-hidden="true"
             style={{
               width: "6px",
               height: "6px",
@@ -305,15 +329,27 @@ export function OpenVikingStatusPopover({
           />
           <span>
             {isOnline
-              ? health?.version
-                ? `ONLINE v${health.version}`
-                : "ONLINE"
+              ? [
+                  "ONLINE",
+                  formatDaemonVersion(health?.version),
+                  sessionUnreadable ? "· no session access" : null,
+                ]
+                  .filter(Boolean)
+                  .join(" ")
               : "OFFLINE"}
           </span>
-        </div>
+        </span>
       </div>
 
-      {/* Session Details: Session ID, Peer ID, Last Commit */}
+      <div
+        style={{
+          borderTop: `.5px solid ${themeVar("hairline")}`,
+          marginBottom: "10px",
+        }}
+        aria-hidden="true"
+      />
+
+      {/* Метаданные сессии */}
       <div
         style={{
           display: "flex",
@@ -322,23 +358,9 @@ export function OpenVikingStatusPopover({
           marginBottom: "10px",
         }}
       >
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-          }}
-        >
-          <span style={{ color: "var(--dsw-text-muted, #94a3b8)" }}>
-            Session ID:
-          </span>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "4px",
-            }}
-          >
+        <div style={rowStyle}>
+          <span style={mutedStyle}>Session ID:</span>
+          <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
             <span
               data-testid="session-id-value"
               role="button"
@@ -350,10 +372,7 @@ export function OpenVikingStatusPopover({
                 }
               }}
               aria-label="Click to copy Session ID"
-              style={{
-                fontFamily: "var(--dsw-font-mono, monospace)",
-                cursor: "pointer",
-              }}
+              style={{ ...monoStyle, cursor: "pointer" }}
               title={displaySessionId}
               onClick={handleCopySessionId}
             >
@@ -369,38 +388,32 @@ export function OpenVikingStatusPopover({
                 background: "none",
                 border: "none",
                 cursor: "pointer",
-                padding: "2px 4px",
-                fontSize: "10px",
+                padding: "2px",
+                display: "inline-flex",
+                alignItems: "center",
                 color: copied
-                  ? "var(--dsw-status-success, #34d399)"
-                  : "var(--dsw-text-muted, #94a3b8)",
-                borderRadius: "3px",
+                  ? themeVar("stateSuccess")
+                  : themeVar("labelTertiary"),
               }}
             >
-              {copied ? "✓" : "📋"}
+              {copied
+                ? CheckIcon && <CheckIcon size={14} />
+                : CopyIcon && <CopyIcon size={14} />}
             </button>
-          </div>
+          </span>
         </div>
 
         {sessionData?.peer_id && (
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-            }}
-          >
-            <span style={{ color: "var(--dsw-text-muted, #94a3b8)" }}>
-              Peer ID:
-            </span>
+          <div style={rowStyle}>
+            <span style={mutedStyle}>Peer ID:</span>
             <span
               data-testid="peer-id-value"
               style={{
+                ...monoStyle,
                 maxWidth: "180px",
                 overflow: "hidden",
                 textOverflow: "ellipsis",
                 whiteSpace: "nowrap",
-                fontFamily: "var(--dsw-font-mono, monospace)",
               }}
               title={sessionData.peer_id}
             >
@@ -410,20 +423,11 @@ export function OpenVikingStatusPopover({
         )}
 
         {sessionData?.last_commit_at && (
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-            }}
-          >
-            <span style={{ color: "var(--dsw-text-muted, #94a3b8)" }}>
-              Last Commit:
-            </span>
+          <div style={rowStyle}>
+            <span style={mutedStyle}>Last Commit:</span>
             <span
               data-testid="last-commit-value"
               title={sessionData.last_commit_at}
-              style={{ color: "var(--dsw-text-default, #e2e8f0)" }}
             >
               {formatRelativeTime(sessionData.last_commit_at) ||
                 sessionData.last_commit_at}
@@ -432,69 +436,67 @@ export function OpenVikingStatusPopover({
         )}
       </div>
 
-      {/* Pending Tokens & Progress Bar */}
+      {/* Накопленные токены */}
       <div style={{ marginBottom: "12px" }}>
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            marginBottom: "4px",
-          }}
-        >
-          <span style={{ color: "var(--dsw-text-muted, #94a3b8)" }}>
-            Pending Tokens:
-          </span>
-          <span data-testid="pending-tokens-label" style={{ fontWeight: 500 }}>
-            {`${pendingTokens.toLocaleString()} / ${COMMIT_THRESHOLD.toLocaleString()}`}
-          </span>
+        <div style={{ ...rowStyle, marginBottom: "4px" }}>
+          <span style={mutedStyle}>Pending Tokens:</span>
+          <span data-testid="pending-tokens-label">{pendingLabel}</span>
         </div>
-        <div
-          data-testid="progress-bar-track"
-          style={{
-            width: "100%",
-            height: "6px",
-            borderRadius: "3px",
-            backgroundColor: "rgba(255, 255, 255, 0.1)",
-            overflow: "hidden",
-          }}
-        >
+        {!sessionUnreadable && (
           <div
-            data-testid="progress-bar-fill"
+            data-testid="progress-bar-track"
             style={{
-              width: `${progressPercent}%`,
-              height: "100%",
-              backgroundColor: progressBarColor,
-              transition: "width 0.3s ease, background-color 0.3s ease",
+              width: "100%",
+              height: "6px",
+              borderRadius: "3px",
+              backgroundColor: themeVar("insetSurface"),
+              overflow: "hidden",
             }}
-          />
-        </div>
+          >
+            <div
+              data-testid="progress-bar-fill"
+              style={{
+                width: `${progressPercent}%`,
+                height: "100%",
+                backgroundColor: progressBarColor,
+                transition: "width 0.3s ease, background-color 0.3s ease",
+              }}
+            />
+          </div>
+        )}
       </div>
 
-      {/* Recalled Memories Section */}
+      {/* Причина недоступности счётчиков */}
+      {sessionUnreadable && (
+        <div
+          data-testid="session-unreadable-notice"
+          style={{
+            marginBottom: "12px",
+            color: themeVar("labelTertiary"),
+          }}
+        >
+          {unauthorized
+            ? "The daemon requires an API key. Set openviking_api_key in localStorage to read session counters."
+            : "Session counters are unavailable right now."}
+        </div>
+      )}
+
+      {/* Подмешанные воспоминания */}
       <div style={{ marginBottom: "12px" }}>
         <div
           style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
             marginBottom: "4px",
+            color: themeVar("labelPrimary"),
+            fontWeight: 500,
           }}
         >
-          <span style={{ fontWeight: 600, fontSize: "11px" }}>
-            {`Recalled Memories (${recalledCount})`}
-          </span>
+          {`Recalled Memories (${recalledCount})`}
         </div>
 
         {memoryItems.length === 0 ? (
           <div
             data-testid="empty-memories-message"
-            style={{
-              padding: "8px 0",
-              color: "var(--dsw-text-muted, #94a3b8)",
-              fontStyle: "italic",
-              fontSize: "11px",
-              textAlign: "center",
-            }}
+            style={{ ...mutedStyle, padding: "4px 0" }}
           >
             No memories recalled in this session
           </div>
@@ -519,22 +521,12 @@ export function OpenVikingStatusPopover({
                   display: "flex",
                   alignItems: "center",
                   gap: "6px",
-                  padding: "4px 6px",
-                  borderRadius: "4px",
-                  backgroundColor: "rgba(255, 255, 255, 0.04)",
-                  border:
-                    "1px solid var(--dsw-border-subtle, rgba(255, 255, 255, 0.05))",
-                  fontSize: "11px",
+                  minWidth: 0,
                 }}
               >
-                {/* Category Badge */}
                 <span
                   data-testid="memory-category-badge"
                   style={{
-                    fontSize: "9px",
-                    fontWeight: 600,
-                    padding: "1px 4px",
-                    borderRadius: "3px",
                     textTransform: "uppercase",
                     flexShrink: 0,
                     ...getCategoryBadgeStyle(item.category),
@@ -543,40 +535,20 @@ export function OpenVikingStatusPopover({
                   {item.category || "memory"}
                 </span>
 
-                {/* Source Badge */}
                 <span
                   data-testid="memory-source-badge"
-                  style={{
-                    fontSize: "9px",
-                    fontWeight: 600,
-                    padding: "1px 4px",
-                    borderRadius: "3px",
-                    textTransform: "uppercase",
-                    flexShrink: 0,
-                    ...(item.source === "profile"
-                      ? {
-                          backgroundColor: "rgba(99, 102, 241, 0.15)",
-                          color: "#818cf8",
-                        }
-                      : {
-                          backgroundColor: "rgba(16, 185, 129, 0.15)",
-                          color: "var(--dsw-status-success, #34d399)",
-                        }),
-                  }}
+                  style={{ ...mutedStyle, flexShrink: 0 }}
                 >
                   {item.source}
                 </span>
 
-                {/* Leaf Filename or Relative Path */}
                 <span
                   data-testid="memory-leaf-name"
                   style={{
-                    flex: 1,
                     overflow: "hidden",
                     textOverflow: "ellipsis",
                     whiteSpace: "nowrap",
-                    fontFamily: "var(--dsw-font-mono, monospace)",
-                    color: "var(--dsw-text-default, #f1f5f9)",
+                    minWidth: 0,
                   }}
                 >
                   {formatMemoryLeafName(item.uri)}
@@ -587,48 +559,33 @@ export function OpenVikingStatusPopover({
         )}
       </div>
 
-      {/* Commit Error Message (if any) */}
       {commitError && (
         <div
           data-testid="commit-error-message"
-          style={{
-            marginBottom: "8px",
-            padding: "6px 8px",
-            borderRadius: "4px",
-            backgroundColor: "rgba(248, 113, 113, 0.1)",
-            border: "1px solid var(--dsw-status-error, #f87171)",
-            color: "var(--dsw-status-error, #f87171)",
-            fontSize: "11px",
-            wordBreak: "break-word",
-          }}
+          style={{ marginBottom: "8px", color: themeVar("stateError") }}
         >
           {commitError}
         </div>
       )}
 
-      {/* Actions: Commit To Memory Now Button */}
       <button
         type="button"
         data-testid="commit-now-btn"
-        onClick={() => onCommitNow?.()}
+        onClick={() => void onCommitNow?.()}
         disabled={isCommitDisabled}
         style={{
           width: "100%",
-          padding: "7px 0",
-          borderRadius: "6px",
-          border: "1px solid var(--dsw-border-default, #475569)",
-          backgroundColor: isCommitting
-            ? "var(--dsw-surface-active, #334155)"
-            : isCommitDisabled
-              ? "rgba(255, 255, 255, 0.03)"
-              : "var(--dsw-surface-base, #1e293b)",
+          padding: "6px 10px",
+          borderRadius: "8px",
+          border: `.5px solid ${themeVar("hairline")}`,
+          background: isCommitDisabled
+            ? "transparent"
+            : themeVar("hoverBackground"),
           color: isCommitDisabled
-            ? "var(--dsw-text-muted, #64748b)"
-            : "var(--dsw-text-default, #f8fafc)",
-          cursor: isCommitDisabled ? "not-allowed" : "pointer",
-          fontWeight: 600,
-          fontSize: "12px",
-          transition: "all 0.15s ease",
+            ? themeVar("labelTertiary")
+            : themeVar("labelPrimary"),
+          cursor: isCommitDisabled ? "default" : "pointer",
+          font: "inherit",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -638,12 +595,13 @@ export function OpenVikingStatusPopover({
         {isCommitting ? (
           <>
             <span
+              aria-hidden="true"
               style={{
                 display: "inline-block",
                 width: "10px",
                 height: "10px",
                 borderRadius: "50%",
-                border: "2px solid var(--dsw-status-warning, #fbbf24)",
+                border: `2px solid ${themeVar("stateWarning")}`,
                 borderTopColor: "transparent",
                 animation: "ov-spin 1s linear infinite",
               }}

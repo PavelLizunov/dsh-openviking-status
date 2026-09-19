@@ -8,8 +8,7 @@ import {
   formatStatusLabel,
   formatTooltipTitle,
   getStatusIndicatorColor,
-  getStatusGlow,
-  getFallbackSessionMessages,
+  themeVar,
   apply,
 } from "../lib/client.js";
 
@@ -89,31 +88,31 @@ describe("formatTooltipTitle", () => {
   });
 });
 
-describe("getStatusIndicatorColor and getStatusGlow", () => {
-  it("returns error red and no glow when offline", () => {
-    assert.strictEqual(
-      getStatusIndicatorColor(false),
-      "var(--dsw-status-error, #f87171)"
-    );
-    assert.strictEqual(getStatusGlow(false), "none");
+describe("getStatusIndicatorColor", () => {
+  // Цвета берутся из карты темы: имена свойств проверяет tests/theme.test.ts,
+  // здесь фиксируется только выбор состояния.
+  it("returns the error colour when offline", () => {
+    assert.strictEqual(getStatusIndicatorColor(false), themeVar("stateError"));
   });
 
-  it("returns warning yellow and no glow when committing", () => {
+  it("returns the warning colour while committing", () => {
     assert.strictEqual(
       getStatusIndicatorColor(true, true),
-      "var(--dsw-status-warning, #fbbf24)"
+      themeVar("stateWarning")
     );
-    assert.strictEqual(getStatusGlow(true, true), "none");
   });
 
-  it("returns success green and subtle glow when online", () => {
+  it("returns the warning colour when the session cannot be read", () => {
+    assert.strictEqual(
+      getStatusIndicatorColor(true, false, true),
+      themeVar("stateWarning")
+    );
+  });
+
+  it("returns the success colour when online and idle", () => {
     assert.strictEqual(
       getStatusIndicatorColor(true, false),
-      "var(--dsw-status-success, #34d399)"
-    );
-    assert.strictEqual(
-      getStatusGlow(true, false),
-      "0 0 6px var(--dsw-status-success, #34d399)"
+      themeVar("stateSuccess")
     );
   });
 });
@@ -160,9 +159,9 @@ Wrench board
     // Should display OV: and 3 rec · 3k pend (2 from profile + 1 from recall = 3)
     assert.ok(html.includes("OV:"));
     assert.ok(html.includes("3 rec · 3k pend"));
-    // Dot indicator with green color and glow
-    assert.ok(html.includes("var(--dsw-status-success, #34d399)"));
-    assert.ok(html.includes("0 0 6px var(--dsw-status-success, #34d399)"));
+    // Индикатор здоровья берёт цвет из темы. Свечения больше нет: штатные
+    // чипы DSH его не рисуют.
+    assert.ok(html.includes(themeVar("stateSuccess")));
     // Accessible tooltip/title
     assert.ok(
       html.includes("OpenViking: Online (3 recalled, 3,450 pending tokens)")
@@ -203,13 +202,30 @@ Wrench board
 
     assert.ok(html.includes("OV"));
     assert.ok(html.includes("offline"));
-    assert.ok(html.includes("var(--dsw-status-error, #f87171)"));
+    assert.ok(html.includes(themeVar("stateError")));
     assert.ok(html.includes("OpenViking: Offline"));
-    // No glow when offline
+  });
+
+  it("не рисует собственный фон и рамку, как штатные чипы DSH", () => {
+    const html = renderToString(
+      React.createElement(OpenVikingStatusChip, {
+        sessionId: "test-session-chrome",
+        initialHealth: { ok: true },
+        initialSessionData: { session_id: "x", pending_tokens: 1000 },
+      })
+    );
+
     assert.ok(
-      html.includes("box-shadow:none") ||
-        html.includes("boxShadow:none") ||
-        !html.includes("0 0 6px")
+      html.includes("border:none"),
+      `чип обязан быть без рамки: ${html}`
+    );
+    assert.ok(
+      html.includes("background:transparent"),
+      `чип обязан быть без фона в покое: ${html}`
+    );
+    assert.ok(
+      html.includes("border-radius:24px"),
+      `радиус обязан совпадать с чипами статистики: ${html}`
     );
   });
 
@@ -278,11 +294,11 @@ Wrench board
 });
 
 describe("apply(ctx) Cordis Registration", () => {
-  // `conversation.input.right` — списочный слот со скоупом сессии, поэтому
-  // `sessionId` приходит компоненту стандартным пропом от владельца слота.
-  // Ячейка адресуется парой `name` + собственный `id`; чужой `id` занял бы
-  // и заменил ячейку соседнего плагина.
-  it("занимает собственную ячейку в conversation.input.right", () => {
+  // `conversation.composer.dock` — списочный слот строки статистики под
+  // композером, со скоупом сессии: `sessionId` и `useChat` приходят
+  // стандартными пропами. Ячейка адресуется парой `name` + собственный `id`;
+  // чужой `id` занял бы и заменил ячейку соседнего плагина.
+  it("занимает собственную ячейку в conversation.composer.dock", () => {
     let injectedSlot: string | null = null;
     let registeredOptions: any = null;
     let registeredComponent: any = null;
@@ -314,8 +330,8 @@ describe("apply(ctx) Cordis Registration", () => {
 
     apply(mockCtx);
 
-    assert.strictEqual(injectedSlot, "conversation.input.right");
-    assert.strictEqual(registeredOptions.name, "conversation.input.right");
+    assert.strictEqual(injectedSlot, "conversation.composer.dock");
+    assert.strictEqual(registeredOptions.name, "conversation.composer.dock");
     assert.strictEqual(registeredOptions.id, "openviking-status");
     assert.strictEqual(typeof registeredOptions.order, "number");
     assert.strictEqual(registeredComponent, OpenVikingStatusChip);
@@ -324,44 +340,8 @@ describe("apply(ctx) Cordis Registration", () => {
   });
 });
 
-describe("getFallbackSessionMessages", () => {
-  it("returns undefined for empty sessionId or when window is undefined", () => {
-    assert.strictEqual(getFallbackSessionMessages(""), undefined);
-  });
-
-  it("extracts messages from window.__DSH_STORE__ conversations state", () => {
-    const originalWindow = (globalThis as any).window;
-    try {
-      const mockMessages = [{ role: "user", content: "hello from store" }];
-      (globalThis as any).window = {
-        __DSH_STORE__: {
-          getState: () => ({
-            conversations: {
-              "sess-1": { messages: mockMessages },
-            },
-          }),
-        },
-      };
-      const result = getFallbackSessionMessages("sess-1");
-      assert.deepStrictEqual(result, mockMessages);
-    } finally {
-      (globalThis as any).window = originalWindow;
-    }
-  });
-
-  it("extracts messages from window.__DSH_SESSION_MESSAGES__ fallback", () => {
-    const originalWindow = (globalThis as any).window;
-    try {
-      const mockMessages = [{ role: "user", content: "hello from global map" }];
-      (globalThis as any).window = {
-        __DSH_SESSION_MESSAGES__: {
-          "sess-2": mockMessages,
-        },
-      };
-      const result = getFallbackSessionMessages("sess-2");
-      assert.deepStrictEqual(result, mockMessages);
-    } finally {
-      (globalThis as any).window = originalWindow;
-    }
-  });
-});
+// Тесты `getFallbackSessionMessages` удалены вместе с самой функцией: она
+// читала `window.__DSH_STORE__` / `window.__DSH_SESSION_MESSAGES__` — глобалы,
+// которых в DSH нет, поэтому счётчик воспоминаний всегда был нулевым. Теперь
+// диалог приходит стандартным пропом `useChat`; покрытие — в
+// tests/chipData.test.ts.

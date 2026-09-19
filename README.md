@@ -4,12 +4,28 @@
 
 ## Overview
 
-This DSH UI plugin injects a live status chip into the composer bottom bar (`conversation.input.right`). It provides at-a-glance transparency into OpenViking memory management:
+This DSH UI plugin adds a chip to the composer stats row
+(`conversation.composer.dock`), alongside `24 turns 645 steps`. It provides
+at-a-glance transparency into OpenViking memory management:
 
 - **Server Health**: Online / Offline indicator with live health checks.
 - **Pending Tokens**: Real-time counter of session tokens accumulated before the auto-commit threshold (20,000 tokens).
-- **Peer Scope**: Active project/repository context peer ID.
+- **Recalled Memories**: Count and list of the `viking://` files injected into the current conversation.
 - **Commit Trigger**: Instant "Commit To Memory Now" action button.
+
+## API key
+
+If the daemon runs with `auth_mode: api_key` — check with
+`curl -s http://127.0.0.1:1933/health` — session counters are unreadable
+without a key, and the chip says `no access` rather than showing zeros. The
+browser cannot read `~/.openviking/ovcli.conf`, so supply the key once from the
+DSH devtools console:
+
+```js
+localStorage.setItem("openviking_api_key", "<your key>");
+```
+
+The key from `ovcli.conf` works. Daemons without authentication need nothing.
 
 ## Architecture & Design
 

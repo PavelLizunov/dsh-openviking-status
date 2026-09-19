@@ -44,6 +44,24 @@ export interface CommitResult {
 }
 
 /**
+ * Исход попытки прочитать сессию.
+ *
+ * Причина неудачи важна: при `auth_mode: api_key` демон отвечает на `/health`
+ * и отказывает на сессии, и «нечитаемо» нельзя показывать как «накоплено ноль».
+ */
+export type SessionReadResult =
+  /** Сессия прочитана. */
+  | { status: "ok"; session: SessionStatus }
+  /** Демон требует ключ, которого у клиента нет. */
+  | { status: "unauthorized" }
+  /** Демон не знает такой сессии. */
+  | { status: "missing" }
+  /** До демона не удалось достучаться. */
+  | { status: "unreachable"; detail?: string }
+  /** Демон ответил ошибкой или неожиданным телом. */
+  | { status: "error"; detail?: string };
+
+/**
  * Синонимы доменных понятий из CONTEXT.md
  */
 export type PendingTokens = number;
@@ -170,6 +188,11 @@ export class OpenVikingClient {
     } else if (raw.startsWith("dsh-")) {
       const suffix = raw.slice("dsh-".length);
       candidates.push(raw, `dsh-session-${suffix}`);
+    } else if (raw.startsWith("session-")) {
+      // DSH отдаёт `session-<uuid>`, OpenViking хранит `dsh-session-<uuid>`:
+      // достаточно приписать `dsh-`. Общая ветка ниже добавила бы ещё один
+      // `session-`, и первый запрос на каждом опросе гарантированно давал 404.
+      candidates.push(`dsh-${raw}`, raw);
     } else {
       // Если префикс dsh- отсутствует, сначала пробуем dsh-session-, затем dsh-, затем исходный raw
       candidates.push(`dsh-session-${raw}`, `dsh-${raw}`, raw);
@@ -222,12 +245,16 @@ export class OpenVikingClient {
   }
 
   /**
-   * Получение метаданных сессии по идентификатору с автоматическим разрешением префикса.
-   * При сетевых сбоях или ошибках авторизации возвращает null, не выбрасывая исключений.
+   * Чтение метаданных сессии с явной причиной неудачи.
+   *
+   * Демон может работать с `auth_mode: api_key`: тогда `/health` остаётся
+   * открытым, а сессия отвечает 401. Схлопывать это в «нет данных» нельзя —
+   * иначе интерфейс покажет живой индикатор рядом с нулями и умолчит о том,
+   * что счётчики просто недоступны.
    */
-  async fetchSession(sessionId: string): Promise<SessionStatus | null> {
+  async readSession(sessionId: string): Promise<SessionReadResult> {
     if (!sessionId || !sessionId.trim()) {
-      return null;
+      return { status: "missing" };
     }
 
     const candidates = this.getCandidateSessionIds(sessionId);
@@ -247,9 +274,12 @@ export class OpenVikingClient {
           continue;
         }
 
+        if (res.status === 401 || res.status === 403) {
+          return { status: "unauthorized" };
+        }
+
         if (!res.ok) {
-          // Ошибки авторизации или внутренние сбои сервера
-          return null;
+          return { status: "error", detail: `HTTP ${res.status}` };
         }
 
         const data = (await res.json()) as Record<string, unknown>;
@@ -259,42 +289,59 @@ export class OpenVikingClient {
         >;
 
         if (!raw || typeof raw !== "object") {
-          return null;
+          return { status: "error", detail: "malformed response body" };
         }
 
         // Запоминаем успешно разрешенный идентификатор
         this.resolvedSessionIds.set(sessionId.trim(), candidateId);
 
         return {
-          session_id:
-            typeof raw.session_id === "string" ? raw.session_id : candidateId,
-          peer_id: typeof raw.peer_id === "string" ? raw.peer_id : undefined,
-          pending_tokens:
-            typeof raw.pending_tokens === "number" ? raw.pending_tokens : 0,
-          message_count:
-            typeof raw.message_count === "number"
-              ? raw.message_count
-              : undefined,
-          commit_count:
-            typeof raw.commit_count === "number" ? raw.commit_count : undefined,
-          last_commit_at:
-            typeof raw.last_commit_at === "string"
-              ? raw.last_commit_at
-              : typeof raw.last_commit === "string"
-                ? raw.last_commit
+          status: "ok",
+          session: {
+            session_id:
+              typeof raw.session_id === "string" ? raw.session_id : candidateId,
+            peer_id: typeof raw.peer_id === "string" ? raw.peer_id : undefined,
+            pending_tokens:
+              typeof raw.pending_tokens === "number" ? raw.pending_tokens : 0,
+            message_count:
+              typeof raw.message_count === "number"
+                ? raw.message_count
                 : undefined,
-          created_at:
-            typeof raw.created_at === "string" ? raw.created_at : undefined,
-          updated_at:
-            typeof raw.updated_at === "string" ? raw.updated_at : undefined,
+            commit_count:
+              typeof raw.commit_count === "number"
+                ? raw.commit_count
+                : undefined,
+            last_commit_at:
+              typeof raw.last_commit_at === "string"
+                ? raw.last_commit_at
+                : typeof raw.last_commit === "string"
+                  ? raw.last_commit
+                  : undefined,
+            created_at:
+              typeof raw.created_at === "string" ? raw.created_at : undefined,
+            updated_at:
+              typeof raw.updated_at === "string" ? raw.updated_at : undefined,
+          },
         };
-      } catch {
-        // Сетевая ошибка или недоступность хоста
-        return null;
+      } catch (err) {
+        return {
+          status: "unreachable",
+          detail: err instanceof Error ? err.message : String(err),
+        };
       }
     }
 
-    return null;
+    return { status: "missing" };
+  }
+
+  /**
+   * Получение метаданных сессии по идентификатору.
+   * Обёртка над {@link readSession} для вызывающих, которым причина неудачи
+   * не нужна: любая неудача сводится к null.
+   */
+  async fetchSession(sessionId: string): Promise<SessionStatus | null> {
+    const result = await this.readSession(sessionId);
+    return result.status === "ok" ? result.session : null;
   }
 
   /**
