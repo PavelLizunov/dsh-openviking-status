@@ -1,4 +1,4 @@
-# @openviking-community/dsh-openviking-status
+# @dipertq/dsh-openviking-status
 
 > Minimalist OpenViking status chip and popover for DeepSeek Harness (DSH Desktop / Web).
 
@@ -17,25 +17,28 @@ See [CONTEXT.md](./CONTEXT.md), [ADR 0001](./docs/adr/0001-client-ui-widget.md),
 
 ## Installation in DeepSeek Harness
 
-### Release tarball (recommended)
-
-In the DSH terminal, using the current version:
+### From npm (recommended)
 
 ```bash
-dsh plugin add https://github.com/dipertq/dsh-openviking-status/releases/download/v0.1.5/openviking-community-dsh-openviking-status-0.1.5.tgz
+dsh plugin add @dipertq/dsh-openviking-status
 ```
 
 Then restart DSH Desktop. That is the whole procedure: DSH reads the package's
 `dsh.bundle.patch`, adds it to `dsh.profile.bundles` itself, and the chip appears
 in the composer bar.
 
-Use a **version-pinned** URL, as above. The
-`/releases/latest/download/…` form resolves to the newest release, but its
-content changes under a fixed URL, so pnpm records no `integrity` for it and
-every later `pnpm install` in that profile fails with
-`ERR_PNPM_MISSING_TARBALL_INTEGRITY`. Pick the newest version from the
-[releases page](https://github.com/dipertq/dsh-openviking-status/releases) and
-re-run the command to upgrade.
+### From a release tarball
+
+Equivalent, and useful when the registry is unreachable. Use a
+**version-pinned** URL:
+
+```bash
+dsh plugin add https://github.com/dipertq/dsh-openviking-status/releases/download/v0.1.5/dipertq-dsh-openviking-status-0.1.5.tgz
+```
+
+Not `/releases/latest/download/…`: that URL keeps its name while its content
+changes, so pnpm records no `integrity` for it and every later `pnpm install` in
+the profile fails with `ERR_PNPM_MISSING_TARBALL_INTEGRITY`.
 
 ### Why not `github:dipertq/...`?
 
@@ -48,11 +51,11 @@ re-added for each new version:
 ```yaml
 # ~/.dsh/profiles/desktop/pnpm-workspace.yaml
 allowBuilds:
-  "@openviking-community/dsh-openviking-status@https://codeload.github.com/dipertq/dsh-openviking-status/tar.gz/<commit-sha>": true
+  "@dipertq/dsh-openviking-status@https://codeload.github.com/dipertq/dsh-openviking-status/tar.gz/<commit-sha>": true
 ```
 
-The tarball ships `lib/` already compiled, so no build script runs and no
-allowlist entry is needed. See [ADR 0004](./docs/adr/0004-install-paths.md).
+Both recommended forms ship `lib/` already compiled, so no build script runs and
+no allowlist entry is needed. See [ADR 0004](./docs/adr/0004-install-paths.md).
 
 ### Troubleshooting: `ERR_PNPM_IGNORED_BUILDS`
 
@@ -61,12 +64,12 @@ If a previous `github:` attempt left entries in your profile's
 
 ```yaml
 allowBuilds:
-  "@openviking-community/dsh-openviking-status@https://...": set this to true or false
+  "@dipertq/dsh-openviking-status@https://...": set this to true or false
 ```
 
 A placeholder means "not decided yet", so every install fails until it is a real
-boolean. Delete those stale entries — installing from the tarball needs none of
-them:
+boolean. Delete those stale entries — neither recommended install path needs
+any of them:
 
 ```yaml
 allowBuilds:
@@ -87,27 +90,22 @@ allowBuilds:
   ```
   Bump the install URL in this README to the new version — CI fails if it drifts.
 
-### Publishing to npm (optional, removes both install caveats)
+### npm publishing
 
-The release workflow already has an npm publish step; it no-ops until the
-repository has an `NPM_TOKEN` secret. Once published, installation becomes a
-plain name with no URL, no `allowBuilds`, and no version to keep in sync:
+Releases publish to npm through
+[trusted publishing](https://docs.npmjs.com/trusted-publishers): GitHub Actions
+authenticates over OIDC with short-lived credentials, so there is no `NPM_TOKEN`
+secret to store or rotate, and each release carries a provenance attestation
+proving which commit and workflow built it.
 
-```bash
-dsh plugin add @openviking-community/dsh-openviking-status
-```
+One-time setup, after the first version exists in the registry (trusted
+publishing is configured per package):
 
-To enable it:
-
-1. Create the `openviking-community` scope (or change `name` in `package.json`
-   to a scope you own) at <https://www.npmjs.com/org/create>.
-2. Generate an **Automation** access token at
-   <https://www.npmjs.com/settings/~/tokens>.
-3. Add it as the `NPM_TOKEN` repository secret:
-   ```bash
-   gh secret set NPM_TOKEN
-   ```
-4. Cut the next release as usual.
+1. Publish `0.1.5` once by hand: `npm publish --access public`.
+2. On the package's **Settings → Trusted Publisher** page, add a GitHub Actions
+   publisher: user `dipertq`, repository `dsh-openviking-status`, workflow
+   `release.yml`, environment blank.
+3. Cut releases as usual — the workflow publishes on its own.
 
 ## License
 

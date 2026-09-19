@@ -1,4 +1,4 @@
 - insert:
     - id: openviking-status-ui
-      name: "@openviking-community/dsh-openviking-status"
+      name: "@dipertq/dsh-openviking-status"
       config: {}

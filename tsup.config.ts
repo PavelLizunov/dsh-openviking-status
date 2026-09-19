@@ -1,7 +1,7 @@
 import { defineConfig } from "tsup";
 
 const CLIENT_ENTRY = "src/client/index.tsx";
-const PACKAGE_ID = "@openviking-community/dsh-openviking-status";
+const PACKAGE_ID = "@dipertq/dsh-openviking-status";
 
 /** React резолвится модульной системой DSH, а не бандлится в плагин. */
 const REACT_EXTERNALS = ["react", "react-dom", "react/jsx-runtime"];

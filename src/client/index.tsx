@@ -9,7 +9,7 @@ export type OpenVikingSessionData = import("./api").SessionStatus;
 export type OpenVikingHealth = import("./api").HealthStatus;
 
 /** Имя пакета, под которым DSH регистрирует клиентскую половину плагина. */
-export const name = "@openviking-community/dsh-openviking-status";
+export const name = "@dipertq/dsh-openviking-status";
 
 /** Сервисы Cordis, которые должны быть готовы до вызова `apply`. */
 export const inject = ["slots"];

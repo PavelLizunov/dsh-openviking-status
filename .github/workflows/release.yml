@@ -13,6 +13,9 @@ on:
 
 permissions:
   contents: write
+  # Required by npm trusted publishing: the job exchanges this OIDC token for
+  # short-lived registry credentials, so no NPM_TOKEN secret is involved.
+  id-token: write
 
 jobs:
   build-and-release:
@@ -72,17 +75,15 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # Optional: publishing to npm unlocks `dsh plugin add <name>` with no URL
-      # at all. Secrets are not readable from a step-level `if`, so the guard
-      # lives inside the script: without an NPM_TOKEN the step no-ops and the
-      # release still succeeds.
-      - name: Publish to npm
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+      # Trusted publishing (OIDC): no NPM_TOKEN anywhere, and npm attaches a
+      # provenance attestation automatically. Requires npm CLI >= 11.5.1, which
+      # is newer than the one bundled with Node 22, hence the explicit upgrade.
+      #
+      # Until the package's Trusted Publisher is configured on npmjs.com, this
+      # step fails; `continue-on-error` keeps the GitHub Release — already
+      # published above — from being held hostage by that.
+      - name: Publish to npm (trusted publishing)
+        continue-on-error: true
         run: |
-          if [ -z "$NPM_TOKEN" ]; then
-            echo "NPM_TOKEN not set — skipping npm publish."
-            exit 0
-          fi
-          npm config set //registry.npmjs.org/:_authToken "$NPM_TOKEN"
+          npm install -g npm@latest
           npm publish --access public

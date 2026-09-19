@@ -24,6 +24,15 @@ const here = dirname(fileURLToPath(import.meta.url));
 const bundlePath = join(here, "..", "lib", "client.cjs");
 const nodeRequire = createRequire(import.meta.url);
 
+/**
+ * Имя читается из манифеста, а не дублируется здесь: DSH ищет фабрику по
+ * идентификатору, равному имени пакета, поэтому расхождение между манифестом и
+ * бандлом — это сбой загрузки, который тест обязан поймать сам.
+ */
+const { name: packageName } = JSON.parse(
+  readFileSync(join(here, "..", "package.json"), "utf8")
+) as { name: string };
+
 interface Registration {
   id: string;
   factory: (require: (specifier: string) => unknown) => Record<string, unknown>;
@@ -60,7 +69,7 @@ test("клиентский бандл регистрируется через __
 
   assert.equal(
     registration.id,
-    "@openviking-community/dsh-openviking-status",
+    packageName,
     "id регистрации обязан совпадать с именем пакета: по нему DSH ищет фабрику"
   );
   assert.equal(typeof registration.factory, "function");
@@ -73,7 +82,7 @@ test("фабрика бандла отдаёт контракт плагина C
   ) as Record<string, unknown>;
 
   assert.equal(typeof exports.apply, "function", "нужен экспорт apply(ctx)");
-  assert.equal(exports.name, "@openviking-community/dsh-openviking-status");
+  assert.equal(exports.name, packageName);
   assert.deepEqual(
     exports.inject,
     ["slots"],
