@@ -232,6 +232,72 @@ test("tasks proxy resolves id, forwards task_type, clamps limit, attaches auth",
   }
 });
 
+test("tasks proxy extracts tasks when daemon responds with real OpenViking shape { status: 'ok', result: [...] }", async () => {
+  const requests: any[] = [];
+  const server = createServer((req, res) => {
+    requests.push({ method: req.method, url: req.url });
+    if (req.url?.startsWith("/api/v1/sessions/dsh-session-ov")) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ result: { session_id: "dsh-session-ov" } }));
+      return;
+    }
+    if (req.url?.startsWith("/api/v1/tasks?")) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      // Real OpenViking response shape: { status: "ok", result: [...] }
+      res.end(
+        JSON.stringify({
+          status: "ok",
+          result: [
+            {
+              task_id: "task-real-1",
+              task_type: "session_commit",
+              status: "running",
+              resource_id: "dsh-session-ov",
+            },
+          ],
+        })
+      );
+      return;
+    }
+    res.writeHead(404, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "not found" }));
+  });
+
+  const daemon = await new Promise<{ server: Server; url: string }>(
+    (resolve) => {
+      server.listen(0, "127.0.0.1", () => {
+        const addr = server.address();
+        const port = typeof addr === "object" && addr ? addr.port : 0;
+        resolve({ server, url: `http://127.0.0.1:${port}` });
+      });
+    }
+  );
+
+  const routes: MockRoute[] = [];
+  const settingsStore = {
+    "openviking-status": { endpoint: daemon.url, apiKey: "srv-token" },
+  };
+  apply(createMockContext(routes, settingsStore) as any);
+
+  try {
+    const tasks = routes.find(
+      (r) => r.path === "/openviking-status/api/tasks"
+    )!;
+    const res = await invokeHandler(
+      tasks,
+      "GET",
+      "/openviking-status/api/tasks?session=session-ov"
+    );
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.body.status, "ok");
+    assert.strictEqual(res.body.resource_id, "dsh-session-ov");
+    assert.strictEqual(res.body.tasks.length, 1);
+    assert.strictEqual(res.body.tasks[0].task_id, "task-real-1");
+  } finally {
+    daemon.server.close();
+  }
+});
+
 test("task detail proxy forwards include_events=true", async () => {
   const daemon = await startMockDaemon();
   const routes: MockRoute[] = [];

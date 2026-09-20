@@ -28,6 +28,20 @@ export const POLL_INTERVAL_IDLE_MS = 15000;
 export const POLL_INTERVAL_ACTIVE_MS = 2500;
 
 /**
+ * Определяет, находится ли опрос в активной фазе (2.5с вместо 15с).
+ *
+ * Активная фаза включается как при выполнении (`running >= 1`), так и при
+ * наличии задач в очереди (`pending >= 1`), чтобы успеть поймать запуск
+ * до завершения быстрой задачи.
+ */
+export function shouldPollActive(
+  breakdown?: ExtractionBreakdown | null
+): boolean {
+  if (!breakdown) return false;
+  return breakdown.running >= 1 || breakdown.pending >= 1;
+}
+
+/**
  * Состояние точки статуса (StateDot).
  *
  * - `offline` — демон недоступен (красный).
@@ -438,19 +452,19 @@ function StatusChipView({
   }, [sessionId, apiClient]);
 
   const breakdown = tasksRead?.status === "ok" ? tasksRead.breakdown : null;
-  const hasRunning = (breakdown?.running ?? 0) >= 1;
+  const hasActivePhase = shouldPollActive(breakdown);
 
-  // Адаптивный поллинг: покой 15с, активная фаза (running) ~2.5с. Терминальный
-  // статус возвращает опрос к покою автоматически, потому что интервал
-  // пересобирается при каждой смене `hasRunning`.
+  // Адаптивный поллинг: покой 15с, активная фаза (running или pending) ~2.5с.
+  // Терминальный статус возвращает опрос к покою автоматически, потому что
+  // интервал пересобирается при каждой смене `hasActivePhase`.
   useEffect(() => {
     fetchStatus();
-    const interval = hasRunning
+    const interval = hasActivePhase
       ? POLL_INTERVAL_ACTIVE_MS
       : POLL_INTERVAL_IDLE_MS;
     const timer = setInterval(fetchStatus, interval);
     return () => clearInterval(timer);
-  }, [fetchStatus, hasRunning]);
+  }, [fetchStatus, hasActivePhase]);
 
   // Закрытие всплывающего окна при клике вне области виджета
   useEffect(() => {

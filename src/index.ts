@@ -95,6 +95,27 @@ function extractTaskId(body: Record<string, unknown> | null): string | null {
 }
 
 /**
+ * Извлечь массив сырых задач из ответа демона OpenViking.
+ *
+ * OpenViking GET /api/v1/tasks возвращает `{ status: "ok", result: [ ... ] }`,
+ * где `result` — сам массив задач.
+ */
+function extractTaskItems(data: unknown): unknown[] {
+  if (!data || typeof data !== "object") return [];
+  if (Array.isArray(data)) return data;
+  const obj = data as Record<string, unknown>;
+  if (Array.isArray(obj.result)) return obj.result;
+  if (Array.isArray(obj.items)) return obj.items;
+  if (Array.isArray(obj.tasks)) return obj.tasks;
+  if (obj.result && typeof obj.result === "object") {
+    const res = obj.result as Record<string, unknown>;
+    if (Array.isArray(res.items)) return res.items;
+    if (Array.isArray(res.tasks)) return res.tasks;
+  }
+  return [];
+}
+
+/**
  * Разрешить идентификатор сессии в существующий `resource_id` формы
  * `dsh-session-<uuid>`.
  *
@@ -623,16 +644,12 @@ export function apply(ctx: any, config?: OpenVikingConfig) {
             string,
             unknown
           >;
-          const items =
-            (data?.items as unknown[]) ??
-            (data?.tasks as unknown[]) ??
-            ((data?.result as Record<string, unknown>)?.items as unknown[]) ??
-            (Array.isArray(data) ? (data as unknown[]) : []);
+          const items = extractTaskItems(data);
 
           sendJson(res, 200, {
             status: "ok",
             resource_id: resourceId,
-            tasks: Array.isArray(items) ? items : [],
+            tasks: items,
           });
         } catch (err) {
           sendJson(res, 200, { status: "unreachable", detail: String(err) });

@@ -129,6 +129,51 @@ export type TaskEventsResult =
 export const TASKS_LIMIT_CAP = 200;
 
 /**
+ * Нормализовать временную метку в ISO-строку.
+ *
+ * Демон OpenViking отдаёт `created_at` / `updated_at` как числом секунд
+ * (Unix timestamp), так и ISO-строками в `created_at_iso` / `updated_at_iso`.
+ */
+export function normalizeTimestamp(
+  ts: unknown,
+  isoFallback?: unknown
+): string | undefined {
+  if (typeof isoFallback === "string" && isoFallback.trim()) {
+    return isoFallback.trim();
+  }
+  if (typeof ts === "string" && ts.trim()) {
+    return ts.trim();
+  }
+  if (typeof ts === "number" && Number.isFinite(ts) && ts > 0) {
+    const ms = ts < 1e11 ? ts * 1000 : ts;
+    return new Date(ms).toISOString();
+  }
+  return undefined;
+}
+
+/**
+ * Извлечь массив сырых задач из ответа демона OpenViking.
+ *
+ * OpenViking GET /api/v1/tasks возвращает `{ status: "ok", result: [ ... ] }`,
+ * где `result` — сам массив задач. Также поддерживаются варианты с `items`,
+ * `tasks`, вложенным `result.items` или плоским массивом в корне.
+ */
+export function extractTaskList(data: unknown): unknown[] {
+  if (!data || typeof data !== "object") return [];
+  if (Array.isArray(data)) return data;
+  const obj = data as Record<string, unknown>;
+  if (Array.isArray(obj.result)) return obj.result;
+  if (Array.isArray(obj.items)) return obj.items;
+  if (Array.isArray(obj.tasks)) return obj.tasks;
+  if (obj.result && typeof obj.result === "object") {
+    const res = obj.result as Record<string, unknown>;
+    if (Array.isArray(res.items)) return res.items;
+    if (Array.isArray(res.tasks)) return res.tasks;
+  }
+  return [];
+}
+
+/**
  * Привести сырую задачу демона к {@link ExtractionTask}.
  *
  * `result` завершённой задачи несёт `memories_extracted{memory_write,memory_edit}`
@@ -183,8 +228,8 @@ export function normalizeExtractionTask(
     status,
     resource_id:
       typeof raw.resource_id === "string" ? raw.resource_id : undefined,
-    created_at: typeof raw.created_at === "string" ? raw.created_at : undefined,
-    updated_at: typeof raw.updated_at === "string" ? raw.updated_at : undefined,
+    created_at: normalizeTimestamp(raw.created_at, raw.created_at_iso),
+    updated_at: normalizeTimestamp(raw.updated_at, raw.updated_at_iso),
     memory_write: numberOf(extracted.memory_write ?? extracted.written),
     memory_edit: numberOf(extracted.memory_edit ?? extracted.edited),
     token_usage: tokenUsage,
@@ -233,8 +278,7 @@ export function normalizeExecutionEvent(
 ): ExecutionEvent {
   return {
     seq: typeof raw.seq === "number" ? raw.seq : undefined,
-    recorded_at:
-      typeof raw.recorded_at === "string" ? raw.recorded_at : undefined,
+    recorded_at: normalizeTimestamp(raw.recorded_at, raw.recorded_at_iso),
     kind: typeof raw.kind === "string" ? raw.kind : undefined,
     status: typeof raw.status === "string" ? raw.status : undefined,
     stage: typeof raw.stage === "string" ? raw.stage : null,
@@ -820,7 +864,7 @@ export class OpenVikingClient {
             status: "error",
             detail: typeof data.detail === "string" ? data.detail : undefined,
           };
-        const tasks = normalizeTaskList(data.tasks);
+        const tasks = normalizeTaskList(extractTaskList(data.tasks ?? data));
         return { status: "ok", breakdown: computeBreakdown(tasks), tasks };
       } catch (err) {
         return {
@@ -877,12 +921,7 @@ export class OpenVikingClient {
         return { status: "error", detail: `HTTP ${res.status}` };
       }
       const data = (await res.json()) as Record<string, unknown>;
-      const items =
-        (data?.items as unknown[]) ??
-        (data?.tasks as unknown[]) ??
-        ((data?.result as Record<string, unknown>)?.items as unknown[]) ??
-        (Array.isArray(data) ? (data as unknown[]) : []);
-      const tasks = normalizeTaskList(items);
+      const tasks = normalizeTaskList(extractTaskList(data));
       return { status: "ok", breakdown: computeBreakdown(tasks), tasks };
     } catch (err) {
       return {

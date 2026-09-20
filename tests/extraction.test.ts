@@ -6,12 +6,15 @@ import {
   OpenVikingClient,
   normalizeExtractionTask,
   normalizeTaskList,
+  extractTaskList,
+  normalizeTimestamp,
   computeBreakdown,
   normalizeExecutionEvent,
   TASKS_LIMIT_CAP,
   getChipDotState,
   getDotColorForState,
   seedRunningTask,
+  shouldPollActive,
   formatDuration,
   formatExtractionSummary,
   formatBacklog,
@@ -81,6 +84,67 @@ describe("normalizeExtractionTask", () => {
 
   it("returns null for entries without an id", () => {
     assert.strictEqual(normalizeExtractionTask({ status: "running" }), null);
+  });
+
+  it("normalizes numeric Unix timestamps and _iso fields", () => {
+    const task = normalizeExtractionTask({
+      task_id: "t-ts",
+      status: "completed",
+      created_at: 1789887980.823,
+      created_at_iso: "2026-09-20T07:06:20.823Z",
+      updated_at: 1789888013.637,
+    });
+    assert.ok(task);
+    assert.strictEqual(task!.created_at, "2026-09-20T07:06:20.823Z");
+    assert.strictEqual(
+      task!.updated_at,
+      new Date(1789888013.637 * 1000).toISOString()
+    );
+  });
+});
+
+describe("normalizeTimestamp", () => {
+  it("prefers isoFallback when available", () => {
+    assert.strictEqual(
+      normalizeTimestamp(1789887980, "2026-09-20T07:06:20Z"),
+      "2026-09-20T07:06:20Z"
+    );
+  });
+
+  it("converts Unix seconds timestamp to ISO string", () => {
+    const iso = normalizeTimestamp(1789887980);
+    assert.strictEqual(iso, new Date(1789887980 * 1000).toISOString());
+  });
+
+  it("handles empty or invalid inputs gracefully", () => {
+    assert.strictEqual(normalizeTimestamp(undefined), undefined);
+    assert.strictEqual(normalizeTimestamp(null), undefined);
+    assert.strictEqual(normalizeTimestamp(""), undefined);
+    assert.strictEqual(normalizeTimestamp(0), undefined);
+  });
+});
+
+describe("extractTaskList", () => {
+  it("extracts tasks array from real OpenViking shape { status: 'ok', result: [...] }", () => {
+    const data = {
+      status: "ok",
+      result: [{ task_id: "t-1", status: "running" }],
+    };
+    const items = extractTaskList(data);
+    assert.strictEqual(items.length, 1);
+    assert.strictEqual((items[0] as any).task_id, "t-1");
+  });
+
+  it("extracts from items, tasks, result.items, and bare array", () => {
+    assert.strictEqual(extractTaskList([{ id: 1 }]).length, 1);
+    assert.strictEqual(extractTaskList({ items: [{ id: 2 }] }).length, 1);
+    assert.strictEqual(extractTaskList({ tasks: [{ id: 3 }] }).length, 1);
+    assert.strictEqual(
+      extractTaskList({ result: { items: [{ id: 4 }] } }).length,
+      1
+    );
+    assert.deepStrictEqual(extractTaskList({}), []);
+    assert.deepStrictEqual(extractTaskList(null), []);
   });
 });
 
@@ -223,6 +287,34 @@ describe("getChipDotState", () => {
       }),
       "session-unreadable"
     );
+  });
+});
+
+describe("shouldPollActive", () => {
+  const mk = (partial: Partial<ExtractionBreakdown>): ExtractionBreakdown => ({
+    running: 0,
+    pending: 0,
+    completed: 0,
+    failed: 0,
+    total: 0,
+    firstRunning: null,
+    lastCompleted: null,
+    lastFailed: null,
+    ...partial,
+  });
+
+  it("returns true when running >= 1", () => {
+    assert.strictEqual(shouldPollActive(mk({ running: 1 })), true);
+  });
+
+  it("returns true when pending >= 1 to catch rapid background launch", () => {
+    assert.strictEqual(shouldPollActive(mk({ pending: 1 })), true);
+  });
+
+  it("returns false when idle or completed only", () => {
+    assert.strictEqual(shouldPollActive(mk({ completed: 2 })), false);
+    assert.strictEqual(shouldPollActive(null), false);
+    assert.strictEqual(shouldPollActive(undefined), false);
   });
 });
 
@@ -642,6 +734,41 @@ describe("OpenVikingClient.listTasks (direct daemon)", () => {
     assert.match(taskUrl, /resource_id=dsh-session-abc/);
     assert.match(taskUrl, /task_type=session_commit/);
     assert.match(taskUrl, new RegExp(`limit=${TASKS_LIMIT_CAP}`));
+  });
+
+  it("handles real OpenViking shape { status: 'ok', result: [...] }", async () => {
+    globalThis.fetch = (async (url: string) => {
+      if (url.includes("/sessions/dsh-session-abc") && !url.includes("tasks")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ session_id: "dsh-session-abc" }),
+        } as Response;
+      }
+      if (url.includes("/api/v1/tasks?")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            status: "ok",
+            result: [
+              { task_id: "r1", status: "running" },
+              { task_id: "c1", status: "completed" },
+            ],
+          }),
+        } as Response;
+      }
+      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    }) as typeof fetch;
+
+    const client = new OpenVikingClient("http://127.0.0.1:1933");
+    const res = await client.listTasks("dsh-session-abc");
+    assert.strictEqual(res.status, "ok");
+    if (res.status === "ok") {
+      assert.strictEqual(res.tasks.length, 2);
+      assert.strictEqual(res.breakdown.running, 1);
+      assert.strictEqual(res.breakdown.completed, 1);
+    }
   });
 
   it("returns missing when no candidate resolves", async () => {
