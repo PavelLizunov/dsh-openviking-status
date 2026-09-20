@@ -1,8 +1,16 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { HealthStatus, SessionStatus, SessionReadResult } from "./api";
+import {
+  HealthStatus,
+  SessionStatus,
+  SessionReadResult,
+  ExtractionBreakdown,
+  ExtractionTask,
+  ExecutionEvent,
+  OpenVikingClient,
+} from "./api";
 import { themeVar } from "./theme";
 import { RecalledMemoriesResult, RecalledMemoryItem } from "./recallParser";
-import { COMMIT_THRESHOLD } from "./OpenVikingStatusChip";
+import { COMMIT_THRESHOLD, WarningGlyph } from "./OpenVikingStatusChip";
 
 /**
  * `require`, который модульная система DSH передаёт фабрике бандла. Объявлен
@@ -40,10 +48,72 @@ export interface OpenVikingStatusPopoverProps {
   endpoint?: string;
   isCommitting?: boolean;
   commitError?: string | null;
+  /** Разбивка задач Phase 2 (Memory Extraction) текущей сессии. */
+  breakdown?: ExtractionBreakdown | null;
+  /** Клиент для ленивой загрузки `execution_events` в «Show log». */
+  client?: OpenVikingClient;
   onCommitNow?: () => Promise<void> | void;
   onClose?: () => void;
   className?: string;
   style?: React.CSSProperties;
+}
+
+/**
+ * Длительность задачи между двумя таймстампами, человекочитаемо (`4.2s`, `1m 12s`).
+ */
+export function formatDuration(
+  startIso?: string,
+  endIso?: string
+): string | undefined {
+  if (!startIso || !endIso) return undefined;
+  const start = new Date(startIso).getTime();
+  const end = new Date(endIso).getTime();
+  if (isNaN(start) || isNaN(end) || end < start) return undefined;
+  const ms = end - start;
+  const sec = ms / 1000;
+  if (sec < 60) {
+    return `${sec < 10 ? sec.toFixed(1) : Math.round(sec)}s`;
+  }
+  const min = Math.floor(sec / 60);
+  const rem = Math.round(sec % 60);
+  return `${min}m ${rem}s`;
+}
+
+/**
+ * Строка last extraction для завершённой задачи:
+ * `<write> written, <edit> edited · <duration> · <relative-time>`.
+ *
+ * Части опускаются, если данных нет: длительность требует обоих таймстампов,
+ * относительное время — `updated_at`.
+ */
+export function formatExtractionSummary(
+  task: ExtractionTask,
+  now: number = Date.now()
+): string {
+  const write = task.memory_write ?? 0;
+  const edit = task.memory_edit ?? 0;
+  const parts: string[] = [`${write} written, ${edit} edited`];
+  const duration = formatDuration(task.created_at, task.updated_at);
+  if (duration) parts.push(duration);
+  const rel = formatRelativeTime(task.updated_at, now);
+  if (rel) parts.push(rel);
+  return parts.join(" · ");
+}
+
+/**
+ * Строка backlog `N pending / M failed`, только когда хвост непуст.
+ * Возвращает `null`, когда всё завершено (строку рисовать не нужно).
+ */
+export function formatBacklog(
+  breakdown?: ExtractionBreakdown | null
+): string | null {
+  if (!breakdown) return null;
+  const { pending, failed } = breakdown;
+  if (pending <= 0 && failed <= 0) return null;
+  const parts: string[] = [];
+  if (pending > 0) parts.push(`${pending} pending`);
+  if (failed > 0) parts.push(`${failed} failed`);
+  return parts.join(" / ");
 }
 
 /**
@@ -173,6 +243,261 @@ export function handleEscapeKey(
 }
 
 /**
+ * Блок Phase 2 (Memory Extraction) рядом с `Commit Now`.
+ *
+ * - `running` → indeterminate-бар + `Extracting…` (без фейкового процента).
+ * - `completed` → строка last extraction + ровная зелёная точка.
+ * - backlog `N pending / M failed` — только когда хвост непуст.
+ * - `failed` → warning-глиф + текст ошибки.
+ * - «Show log» лениво тянет `execution_events` и рендерит ленту переходов.
+ *
+ * Глобальную очередь демона (Requeued и т.п.) блок не показывает намеренно.
+ */
+export function ExtractionSection({
+  breakdown,
+  client,
+}: {
+  breakdown?: ExtractionBreakdown | null;
+  client?: OpenVikingClient;
+}) {
+  const [showLog, setShowLog] = useState(false);
+  const [events, setEvents] = useState<ExecutionEvent[] | null>(null);
+  const [logError, setLogError] = useState<string | null>(null);
+  const [loadingLog, setLoadingLog] = useState(false);
+
+  if (!breakdown) return null;
+
+  const isRunning = breakdown.running >= 1;
+  const lastCompleted = breakdown.lastCompleted;
+  const lastFailed = breakdown.lastFailed;
+  const backlog = formatBacklog(breakdown);
+  const failedActive = !isRunning && breakdown.failed >= 1;
+
+  // Задача для «Show log»: то, что показано в блоке — живое извлечение важнее
+  // прошлых итогов, поэтому running-задача имеет приоритет. Так лента
+  // `created → running → …` доступна прямо во время извлечения.
+  const logTaskId =
+    (isRunning ? breakdown.firstRunning?.task_id : null) ??
+    (failedActive ? lastFailed?.task_id : null) ??
+    lastCompleted?.task_id ??
+    lastFailed?.task_id ??
+    null;
+
+  const mutedStyle: React.CSSProperties = { color: themeVar("labelTertiary") };
+
+  const toggleLog = useCallback(async () => {
+    const next = !showLog;
+    setShowLog(next);
+    if (next && events === null && logTaskId && client) {
+      setLoadingLog(true);
+      setLogError(null);
+      const res = await client.fetchTaskEvents(logTaskId);
+      setLoadingLog(false);
+      if (res.status === "ok") {
+        setEvents(res.events);
+      } else {
+        setLogError(
+          res.status === "unauthorized"
+            ? "No access to task log"
+            : "Could not load log"
+        );
+      }
+    }
+  }, [showLog, events, logTaskId, client]);
+
+  // Ничего показывать не нужно: нет активной задачи, хвоста и завершённых.
+  if (!isRunning && !failedActive && !lastCompleted && !backlog) {
+    return null;
+  }
+
+  return (
+    <div data-testid="extraction-section" style={{ marginBottom: "12px" }}>
+      <div
+        style={{
+          marginBottom: "4px",
+          color: themeVar("labelPrimary"),
+          fontWeight: 500,
+        }}
+      >
+        Memory Extraction
+      </div>
+
+      {isRunning ? (
+        <div>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "6px",
+              marginBottom: "4px",
+            }}
+          >
+            <span
+              data-testid="extraction-status-dot"
+              aria-hidden="true"
+              style={{
+                width: "6px",
+                height: "6px",
+                borderRadius: "50%",
+                background: themeVar("stateSuccess"),
+                animation: "ov-pulse 1.2s ease-in-out infinite",
+                flexShrink: 0,
+              }}
+            />
+            <span data-testid="extraction-running-label">Extracting…</span>
+          </div>
+          <div
+            data-testid="extraction-indeterminate-track"
+            style={{
+              width: "100%",
+              height: "6px",
+              borderRadius: "3px",
+              backgroundColor: themeVar("insetSurface"),
+              overflow: "hidden",
+              position: "relative",
+            }}
+          >
+            <div
+              data-testid="extraction-indeterminate-fill"
+              style={{
+                position: "absolute",
+                left: 0,
+                top: 0,
+                height: "100%",
+                width: "40%",
+                borderRadius: "3px",
+                backgroundColor: themeVar("stateSuccess"),
+                animation: "ov-indeterminate 1.2s ease-in-out infinite",
+              }}
+            />
+          </div>
+        </div>
+      ) : failedActive && lastFailed ? (
+        <div
+          data-testid="extraction-failed-line"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "6px",
+            color: themeVar("stateWarning"),
+          }}
+        >
+          <span
+            aria-hidden="true"
+            style={{ display: "inline-flex", flexShrink: 0 }}
+          >
+            <WarningGlyph size={12} testId="extraction-warning-glyph" />
+          </span>
+          <span data-testid="extraction-failed-text">
+            {lastFailed.error || "extraction failed"}
+          </span>
+        </div>
+      ) : lastCompleted ? (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "6px",
+          }}
+        >
+          <span
+            data-testid="extraction-status-dot"
+            aria-hidden="true"
+            style={{
+              width: "6px",
+              height: "6px",
+              borderRadius: "50%",
+              background: themeVar("stateSuccess"),
+              flexShrink: 0,
+            }}
+          />
+          <span data-testid="extraction-last-line">
+            {formatExtractionSummary(lastCompleted)}
+          </span>
+        </div>
+      ) : null}
+
+      {backlog && (
+        <div
+          data-testid="extraction-backlog-line"
+          style={{ ...mutedStyle, marginTop: "4px" }}
+        >
+          {backlog}
+        </div>
+      )}
+
+      {logTaskId && client && (
+        <div style={{ marginTop: "6px" }}>
+          <button
+            type="button"
+            data-testid="extraction-show-log-btn"
+            onClick={() => void toggleLog()}
+            style={{
+              background: "none",
+              border: "none",
+              padding: 0,
+              cursor: "pointer",
+              font: "inherit",
+              color: themeVar("labelTertiary"),
+              textDecoration: "underline",
+            }}
+            aria-expanded={showLog}
+          >
+            {showLog ? "Hide log" : "Show log"}
+          </button>
+
+          {showLog && (
+            <div
+              data-testid="extraction-log"
+              style={{
+                marginTop: "6px",
+                display: "flex",
+                flexDirection: "column",
+                gap: "2px",
+                maxHeight: "120px",
+                overflowY: "auto",
+              }}
+            >
+              {loadingLog && (
+                <div data-testid="extraction-log-loading" style={mutedStyle}>
+                  Loading…
+                </div>
+              )}
+              {logError && (
+                <div data-testid="extraction-log-error" style={mutedStyle}>
+                  {logError}
+                </div>
+              )}
+              {events && events.length === 0 && !loadingLog && !logError && (
+                <div data-testid="extraction-log-empty" style={mutedStyle}>
+                  No events
+                </div>
+              )}
+              {events?.map((ev, idx) => (
+                <div
+                  key={`${ev.seq ?? idx}-${ev.recorded_at ?? idx}`}
+                  data-testid="extraction-log-event"
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    gap: "8px",
+                  }}
+                >
+                  <span>{ev.status || ev.kind || "event"}</span>
+                  <span style={mutedStyle}>
+                    {formatRelativeTime(ev.recorded_at) || ""}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
  * Панель детального состояния контекстной памяти OpenViking (Status Popover).
  *
  * Оформление повторяет диалог статистики сессии DSH: та же поверхность, тень,
@@ -187,6 +512,8 @@ export function OpenVikingStatusPopover({
   endpoint,
   isCommitting = false,
   commitError = null,
+  breakdown = null,
+  client,
   onCommitNow,
   onClose,
   className,
@@ -286,7 +613,7 @@ export function OpenVikingStatusPopover({
         ...style,
       }}
     >
-      <style>{`@keyframes ov-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+      <style>{`@keyframes ov-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } } @keyframes ov-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.35; transform: scale(0.72); } } @keyframes ov-indeterminate { 0% { left: -40%; } 100% { left: 100%; } }`}</style>
 
       {/* Заголовок: название, эндпоинт, бейдж состояния */}
       <div
@@ -561,6 +888,9 @@ export function OpenVikingStatusPopover({
           </div>
         )}
       </div>
+
+      {/* Phase 2: Memory Extraction */}
+      <ExtractionSection breakdown={breakdown} client={client} />
 
       {commitError && (
         <div

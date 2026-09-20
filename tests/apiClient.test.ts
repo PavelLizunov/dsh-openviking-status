@@ -636,7 +636,11 @@ describe("OpenVikingClient - commitSession(sessionId, options)", () => {
       keep_recent_count: 5,
     });
 
-    assert.deepStrictEqual(result, { ok: true });
+    // Двухфазный коммит: результат несёт разрешённый resource_id. Демон-мок не
+    // вернул task_id, поэтому поле отсутствует (undefined).
+    assert.strictEqual(result.ok, true);
+    assert.strictEqual(result.resource_id, "dsh-session-target");
+    assert.strictEqual(result.task_id, undefined);
     assert.strictEqual(
       capturedUrl,
       "http://127.0.0.1:1933/api/v1/sessions/dsh-session-target/commit"
@@ -698,7 +702,8 @@ describe("OpenVikingClient - commitSession(sessionId, options)", () => {
     assert.strictEqual(requestedUrls.length, 2);
     assert.ok(requestedUrls[0].includes("/dsh-session-fb/commit"));
     assert.ok(requestedUrls[1].includes("/dsh-fb/commit"));
-    assert.deepStrictEqual(result, { ok: true });
+    assert.strictEqual(result.ok, true);
+    assert.strictEqual(result.resource_id, "dsh-fb");
   });
 
   it("returns error on empty or whitespace sessionId", async () => {

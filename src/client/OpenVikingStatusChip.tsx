@@ -12,12 +12,141 @@ import {
   SessionReadResult,
   OpenVikingClient,
   defaultOpenVikingClient,
+  ExtractionBreakdown,
+  ExtractionTask,
+  TasksReadResult,
+  computeBreakdown,
 } from "./api";
 import { themeVar } from "./theme";
 import { RecalledMemoriesResult, parseRecalledMemories } from "./recallParser";
 import { OpenVikingStatusPopover } from "./OpenVikingStatusPopover";
 
 export const COMMIT_THRESHOLD = 20000;
+
+/** Интервалы адаптивного поллинга: покой vs активная фаза извлечения. */
+export const POLL_INTERVAL_IDLE_MS = 15000;
+export const POLL_INTERVAL_ACTIVE_MS = 2500;
+
+/**
+ * Состояние точки статуса (StateDot).
+ *
+ * - `offline` — демон недоступен (красный).
+ * - `session-unreadable` — сессия за ключом, счётчики недоступны (жёлтый статичный).
+ * - `busy` — идёт извлечение памяти (`running >= 1`): акцентный пульс.
+ * - `extraction-failed` — последняя задача провалилась: жёлтый + warning-глиф.
+ * - `online-idle` — норма (зелёный).
+ *
+ * Мигание завязано *строго* на `running`: `pending`-only не пульсирует.
+ */
+export type ChipDotState =
+  | "offline"
+  | "session-unreadable"
+  | "busy"
+  | "extraction-failed"
+  | "online-idle";
+
+/**
+ * Свести состояние демона, сессии и разбивку задач Phase 2 к состоянию точки.
+ *
+ * Приоритет: недоступность демона → нечитаемая сессия → активное извлечение →
+ * провал последней задачи → норма. Провал показываем только когда *хвост*
+ * непуст (есть свежий `failed`) и при этом ничего не выполняется.
+ */
+export function getChipDotState({
+  isOnline,
+  sessionUnreadable,
+  breakdown,
+}: {
+  isOnline: boolean;
+  sessionUnreadable: boolean;
+  breakdown?: ExtractionBreakdown | null;
+}): ChipDotState {
+  if (!isOnline) return "offline";
+  if (sessionUnreadable) return "session-unreadable";
+  if (breakdown && breakdown.running >= 1) return "busy";
+  if (breakdown && breakdown.failed >= 1) return "extraction-failed";
+  return "online-idle";
+}
+
+/**
+ * Warning-глиф (circle-alert) для состояния `extraction-failed`.
+ *
+ * Инлайновый SVG, а не иконка из примитивов DSH: набор экспортируемых имён у
+ * примитивов не гарантирован, а отсутствующий глиф молча стал бы невидимым —
+ * ровно тот отказ, который прячется под работающим кодом. `currentColor`
+ * наследует цвет предупреждения от родителя.
+ */
+export function WarningGlyph({
+  size = 11,
+  testId = "extraction-warning-glyph",
+}: {
+  size?: number;
+  testId?: string;
+}) {
+  return (
+    <svg
+      data-testid={testId}
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="none"
+      aria-hidden="true"
+      style={{ flexShrink: 0, display: "block" }}
+    >
+      <circle cx="8" cy="8" r="6.5" stroke="currentColor" strokeWidth="1.5" />
+      <path
+        d="M8 5v3.5"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+      <circle cx="8" cy="11" r="0.9" fill="currentColor" />
+    </svg>
+  );
+}
+
+/**
+ * Оптимистично добавить `running`-задачу в разбивку после коммита.
+ *
+ * Точка пульсирует мгновенно по `task_id` из ответа коммита; следующий опрос
+ * списка заменит эту заглушку реальной задачей. Если такой `task_id` уже есть в
+ * списке (гонка с опросом) — оставляем как есть.
+ */
+export function seedRunningTask(
+  prev: TasksReadResult | null,
+  taskId: string,
+  resourceId?: string
+): TasksReadResult {
+  const existing =
+    prev && prev.status === "ok" ? prev.tasks : ([] as ExtractionTask[]);
+  if (existing.some((t) => t.task_id === taskId)) {
+    return prev as TasksReadResult;
+  }
+  const seeded: ExtractionTask = {
+    task_id: taskId,
+    status: "running",
+    resource_id: resourceId,
+    updated_at: new Date().toISOString(),
+  };
+  const tasks = [seeded, ...existing];
+  return { status: "ok", breakdown: computeBreakdown(tasks), tasks };
+}
+
+/** Цвет точки для состояния StateDot. */
+export function getDotColorForState(state: ChipDotState): string {
+  switch (state) {
+    case "offline":
+      return themeVar("stateError");
+    case "session-unreadable":
+    case "extraction-failed":
+      return themeVar("stateWarning");
+    case "busy":
+      return themeVar("stateSuccess");
+    case "online-idle":
+    default:
+      return themeVar("stateSuccess");
+  }
+}
 
 /**
  * Селектор поверх снимка диалога — стандартный проп слотов со скоупом сессии.
@@ -39,6 +168,8 @@ export interface OpenVikingStatusChipProps {
   initialHealth?: HealthStatus;
   initialSessionData?: SessionStatus;
   initialSessionRead?: SessionReadResult;
+  /** Стартовая разбивка задач Phase 2 — для рендера вне слота и тестов. */
+  initialTasksRead?: TasksReadResult;
   initialOpen?: boolean;
 }
 
@@ -232,6 +363,7 @@ function StatusChipView({
   initialHealth,
   initialSessionData,
   initialSessionRead,
+  initialTasksRead,
   initialOpen = false,
 }: OpenVikingStatusChipProps) {
   const [health, setHealth] = useState<HealthStatus | null>(
@@ -242,6 +374,9 @@ function StatusChipView({
       (initialSessionData
         ? { status: "ok", session: initialSessionData }
         : null)
+  );
+  const [tasksRead, setTasksRead] = useState<TasksReadResult | null>(
+    initialTasksRead ?? null
   );
   const [isOpen, setIsOpen] = useState(initialOpen);
   const [isCommitting, setIsCommitting] = useState(false);
@@ -291,17 +426,31 @@ function StatusChipView({
         return;
       }
 
-      setSessionRead(await apiClient.readSession(sessionId));
+      const [session, tasks] = await Promise.all([
+        apiClient.readSession(sessionId),
+        apiClient.listTasks(sessionId),
+      ]);
+      setSessionRead(session);
+      setTasksRead(tasks);
     } catch {
       setHealth({ ok: false });
     }
   }, [sessionId, apiClient]);
 
+  const breakdown = tasksRead?.status === "ok" ? tasksRead.breakdown : null;
+  const hasRunning = (breakdown?.running ?? 0) >= 1;
+
+  // Адаптивный поллинг: покой 15с, активная фаза (running) ~2.5с. Терминальный
+  // статус возвращает опрос к покою автоматически, потому что интервал
+  // пересобирается при каждой смене `hasRunning`.
   useEffect(() => {
     fetchStatus();
-    const timer = setInterval(fetchStatus, 15000);
+    const interval = hasRunning
+      ? POLL_INTERVAL_ACTIVE_MS
+      : POLL_INTERVAL_IDLE_MS;
+    const timer = setInterval(fetchStatus, interval);
     return () => clearInterval(timer);
-  }, [fetchStatus]);
+  }, [fetchStatus, hasRunning]);
 
   // Закрытие всплывающего окна при клике вне области виджета
   useEffect(() => {
@@ -337,6 +486,13 @@ function StatusChipView({
         keep_recent_count: 10,
       });
       if (res.ok) {
+        // Мгновенная привязка: `task_id` из ответа коммита позволяет показать
+        // «извлекается» сразу, не дожидаясь, пока опрос списка увидит задачу.
+        if (res.task_id) {
+          setTasksRead((prev) =>
+            seedRunningTask(prev, res.task_id!, res.resource_id)
+          );
+        }
         await fetchStatus();
         onCommit?.();
       } else {
@@ -359,11 +515,21 @@ function StatusChipView({
   const pendingTokens = sessionData?.pending_tokens ?? 0;
   const recalledCount = recalledResult.recalledCount;
 
-  const statusColor = getStatusIndicatorColor(
+  const rawDotState = getChipDotState({
     isOnline,
-    isCommitting,
-    sessionUnreadable
-  );
+    sessionUnreadable,
+    breakdown,
+  });
+  // Коммит в полёте — тоже активная фаза: точка должна пульсировать сразу, не
+  // дожидаясь, пока следующий опрос увидит `running`-задачу. Сворачиваем это в
+  // само состояние, чтобы цвет считался одной картой (getDotColorForState).
+  const dotState: ChipDotState =
+    isCommitting && (rawDotState === "online-idle" || rawDotState === "busy")
+      ? "busy"
+      : rawDotState;
+  const dotBusy = dotState === "busy";
+  const dotFailed = dotState === "extraction-failed";
+  const statusColor = getDotColorForState(dotState);
   const tooltipTitle = formatTooltipTitle({
     isOnline,
     isCommitting,
@@ -386,6 +552,7 @@ function StatusChipView({
       style={{ minWidth: 0, display: "inline-flex", position: "relative" }}
       ref={popoverRef}
     >
+      <style>{`@keyframes ov-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.35; transform: scale(0.72); } }`}</style>
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
@@ -417,17 +584,36 @@ function StatusChipView({
         title={tooltipTitle}
         aria-label={tooltipTitle}
       >
-        <span
-          data-testid="status-dot"
-          aria-hidden="true"
-          style={{
-            width: "6px",
-            height: "6px",
-            borderRadius: "50%",
-            background: statusColor,
-            flexShrink: 0,
-          }}
-        />
+        {dotFailed ? (
+          <span
+            data-testid="status-dot"
+            data-dot-state={dotState}
+            aria-hidden="true"
+            style={{
+              display: "inline-flex",
+              color: statusColor,
+              flexShrink: 0,
+            }}
+          >
+            <WarningGlyph size={11} testId="chip-warning-glyph" />
+          </span>
+        ) : (
+          <span
+            data-testid="status-dot"
+            data-dot-state={dotBusy ? "busy" : dotState}
+            aria-hidden="true"
+            style={{
+              width: "6px",
+              height: "6px",
+              borderRadius: "50%",
+              background: statusColor,
+              flexShrink: 0,
+              ...(dotBusy
+                ? { animation: "ov-pulse 1.2s ease-in-out infinite" }
+                : {}),
+            }}
+          />
+        )}
         <span style={{ textOverflow: "ellipsis", minWidth: 0 }}>{label}</span>
       </button>
 
@@ -441,6 +627,8 @@ function StatusChipView({
           endpoint={apiClient.endpoint}
           isCommitting={isCommitting}
           commitError={commitError}
+          breakdown={breakdown}
+          client={apiClient}
           onCommitNow={handleCommitNow}
           onClose={() => setIsOpen(false)}
         />

@@ -57,9 +57,84 @@ function getCandidateSessionIds(sessionId: string): string[] {
   return Array.from(new Set(candidates));
 }
 
+/** Верхняя граница `limit` у демона (`INVALID_ARGUMENT` за пределом). */
+const TASKS_LIMIT_CAP = 200;
+
+/** Тип фоновой задачи Phase 2, извлекающей память из архива сессии. */
+const SESSION_COMMIT_TASK_TYPE = "session_commit";
+
+/**
+ * Прижать `limit` к диапазону `[1, 200]`. Демон отвергает более крупные
+ * значения с `INVALID_ARGUMENT`, поэтому клэмп делает прокси, а не клиент.
+ */
+function clampLimit(raw: unknown, fallback = TASKS_LIMIT_CAP): number {
+  const n = typeof raw === "string" ? Number.parseInt(raw, 10) : Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return fallback;
+  return Math.min(TASKS_LIMIT_CAP, Math.max(1, Math.floor(n)));
+}
+
+/**
+ * Достать идентификатор задачи из ответа демона на коммит.
+ *
+ * Демон кладёт его то в корень (`task_id`), то во вложенный `result`/`data`,
+ * поэтому проверяем оба уровня и обе формы имени (`task_id` / `id`).
+ */
+function extractTaskId(body: Record<string, unknown> | null): string | null {
+  if (!body || typeof body !== "object") return null;
+  const containers = [
+    body,
+    body.result as Record<string, unknown> | undefined,
+    body.data as Record<string, unknown> | undefined,
+  ];
+  for (const c of containers) {
+    if (!c || typeof c !== "object") continue;
+    const id = c.task_id ?? c.id;
+    if (typeof id === "string" && id.trim()) return id.trim();
+  }
+  return null;
+}
+
+/**
+ * Разрешить идентификатор сессии в существующий `resource_id` формы
+ * `dsh-session-<uuid>`.
+ *
+ * Фильтр задач по `resource_id` — exact match, поэтому берём первый кандидат,
+ * который демон подтверждает через `GET /sessions/{id}`. Переиспользует ту же
+ * логику кандидатов, что и чтение сессии.
+ */
+async function resolveResourceId(
+  endpoint: string,
+  headers: Record<string, string>,
+  sessionId: string,
+  cache?: Map<string, string>
+): Promise<string | null> {
+  const key = sessionId.trim();
+  const cached = cache?.get(key);
+  if (cached) return cached;
+
+  for (const candidateId of getCandidateSessionIds(sessionId)) {
+    const daemonRes = await fetch(
+      `${endpoint}/api/v1/sessions/${encodeURIComponent(candidateId)}`,
+      { method: "GET", headers }
+    ).catch(() => null);
+    if (!daemonRes) continue;
+    if (daemonRes.status === 404) continue;
+    if (daemonRes.ok) {
+      cache?.set(key, candidateId);
+      return candidateId;
+    }
+  }
+  return null;
+}
+
 export function apply(ctx: any, config?: OpenVikingConfig) {
   let currentSettings = () => config ?? {};
   let settingsService: any = null;
+
+  // Кэш разрешения sessionId → resource_id (dsh-session-*). Опрос задач идёт
+  // каждые ~2.5с в активной фазе, а форма id стабильна на всю сессию — без
+  // кэша прокси делал бы лишний session-probe на каждый тик.
+  const resourceIdCache = new Map<string, string>();
 
   // Attach to DSH settings if available
   ctx.inject?.(["settings"], (settingsCtx: any) => {
@@ -458,7 +533,19 @@ export function apply(ctx: any, config?: OpenVikingConfig) {
               return;
             }
 
-            sendJson(res, 200, { ok: true });
+            // Commit демона двухфазный: тело ответа несёт `task_id` фоновой
+            // задачи извлечения (Phase 2). Пробрасываем его, чтобы чип мог
+            // мгновенно привязаться к задаче, не дожидаясь следующего опроса.
+            const okBody = (await daemonRes.json().catch(() => null)) as Record<
+              string,
+              unknown
+            > | null;
+            const taskId = extractTaskId(okBody);
+            sendJson(res, 200, {
+              ok: true,
+              ...(taskId ? { task_id: taskId } : {}),
+              resource_id: candidateId,
+            });
             return;
           }
 
@@ -472,4 +559,148 @@ export function apply(ctx: any, config?: OpenVikingConfig) {
       },
     });
   }, "openviking-status: session commit proxy route");
+
+  // GET /openviking-status/api/tasks?session=<id>&limit=<n>
+  // Разрешает id в resource_id (dsh-session-*) и отдаёт список задач Phase 2
+  // одним запросом. Разбивка по статусам считается на клиенте.
+  ctx.effect?.(() => {
+    return ctx.webServer?.register({
+      kind: "exact",
+      path: `${API_PREFIX}/tasks`,
+      handler: async (req: any, res: any) => {
+        try {
+          const url = new URL(req.url || "/", "http://localhost");
+          const sessionId = url.searchParams.get("session");
+          if (!sessionId || !sessionId.trim()) {
+            sendJson(res, 400, { status: "missing", error: "Missing session" });
+            return;
+          }
+
+          const effective = resolveEffective();
+          const headers = getHeaders(effective.apiKey);
+          const resourceId = await resolveResourceId(
+            effective.endpoint,
+            headers,
+            sessionId.trim(),
+            resourceIdCache
+          );
+
+          if (!resourceId) {
+            sendJson(res, 200, { status: "missing", tasks: [] });
+            return;
+          }
+
+          const limit = clampLimit(url.searchParams.get("limit"));
+          const query = new URLSearchParams({
+            resource_id: resourceId,
+            task_type: SESSION_COMMIT_TASK_TYPE,
+            limit: String(limit),
+          });
+
+          const daemonRes = await fetch(
+            `${effective.endpoint}/api/v1/tasks?${query.toString()}`,
+            { method: "GET", headers }
+          ).catch(() => null);
+
+          if (!daemonRes) {
+            sendJson(res, 200, { status: "unreachable", tasks: [] });
+            return;
+          }
+          if (daemonRes.status === 401 || daemonRes.status === 403) {
+            sendJson(res, 200, { status: "unauthorized", tasks: [] });
+            return;
+          }
+          if (!daemonRes.ok) {
+            sendJson(res, 200, {
+              status: "error",
+              detail: `HTTP ${daemonRes.status}`,
+              tasks: [],
+            });
+            return;
+          }
+
+          const data = (await daemonRes.json().catch(() => ({}))) as Record<
+            string,
+            unknown
+          >;
+          const items =
+            (data?.items as unknown[]) ??
+            (data?.tasks as unknown[]) ??
+            ((data?.result as Record<string, unknown>)?.items as unknown[]) ??
+            (Array.isArray(data) ? (data as unknown[]) : []);
+
+          sendJson(res, 200, {
+            status: "ok",
+            resource_id: resourceId,
+            tasks: Array.isArray(items) ? items : [],
+          });
+        } catch (err) {
+          sendJson(res, 200, { status: "unreachable", detail: String(err) });
+        }
+      },
+    });
+  }, "openviking-status: tasks proxy route");
+
+  // GET /openviking-status/api/task?id=<id>&events=1
+  // Лениво тянет одну задачу с лентой execution_events для «Show log».
+  ctx.effect?.(() => {
+    return ctx.webServer?.register({
+      kind: "exact",
+      path: `${API_PREFIX}/task`,
+      handler: async (req: any, res: any) => {
+        try {
+          const url = new URL(req.url || "/", "http://localhost");
+          const taskId = url.searchParams.get("id");
+          if (!taskId || !taskId.trim()) {
+            sendJson(res, 400, { status: "missing", error: "Missing id" });
+            return;
+          }
+          const withEvents =
+            url.searchParams.get("events") === "1" ||
+            url.searchParams.get("events") === "true";
+
+          const effective = resolveEffective();
+          const query = withEvents ? "?include_events=true" : "";
+          const daemonRes = await fetch(
+            `${effective.endpoint}/api/v1/tasks/${encodeURIComponent(
+              taskId.trim()
+            )}${query}`,
+            { method: "GET", headers: getHeaders(effective.apiKey) }
+          ).catch(() => null);
+
+          if (!daemonRes) {
+            sendJson(res, 200, { status: "unreachable" });
+            return;
+          }
+          if (daemonRes.status === 404) {
+            sendJson(res, 200, { status: "missing" });
+            return;
+          }
+          if (daemonRes.status === 401 || daemonRes.status === 403) {
+            sendJson(res, 200, { status: "unauthorized" });
+            return;
+          }
+          if (!daemonRes.ok) {
+            sendJson(res, 200, {
+              status: "error",
+              detail: `HTTP ${daemonRes.status}`,
+            });
+            return;
+          }
+
+          const data = (await daemonRes.json().catch(() => ({}))) as Record<
+            string,
+            unknown
+          >;
+          const task = (data?.result ?? data?.data ?? data) as Record<
+            string,
+            unknown
+          >;
+          sendJson(res, 200, { status: "ok", task });
+        } catch (err) {
+          sendJson(res, 200, { status: "unreachable", detail: String(err) });
+        }
+      },
+    });
+  }, "openviking-status: task detail proxy route");
 }
