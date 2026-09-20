@@ -227,6 +227,14 @@ Wrench board
       html.includes("border-radius:24px"),
       `радиус обязан совпадать с чипами статистики: ${html}`
     );
+    assert.ok(
+      html.includes("font-size:var(--dsh-content-font-size-secondary, 13px)"),
+      `размер шрифта обязан совпадать со вторичным шрифтом статистики: ${html}`
+    );
+    assert.ok(
+      html.includes('data-openviking-status="true"'),
+      `чип обязан иметь атрибут data-openviking-status: ${html}`
+    );
   });
 
   it("gracefully handles zero memories: 'OV: 0 rec · 0k pend'", () => {

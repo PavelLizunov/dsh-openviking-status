@@ -5,6 +5,7 @@ import React, {
   useRef,
   useMemo,
 } from "react";
+import ReactDOM from "react-dom";
 import {
   HealthStatus,
   SessionStatus,
@@ -246,9 +247,27 @@ function StatusChipView({
   const [isCommitting, setIsCommitting] = useState(false);
   const [commitError, setCommitError] = useState<string | null>(null);
   const [isHovered, setIsHovered] = useState(false);
+  const [statsHost, setStatsHost] = useState<Element | null>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
 
   const apiClient = client ?? defaultOpenVikingClient;
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+
+    function findHost() {
+      const el = document.querySelector("[data-composer-stats]");
+      setStatsHost((prev) => (prev !== el ? el : prev));
+    }
+
+    findHost();
+
+    const observer = new MutationObserver(() => {
+      findHost();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, []);
 
   // Источник текста диалога: готовая строка либо переданные узлы. Вариант с
   // `useChat` живёт в отдельном компоненте: этот проп сам является хуком, и
@@ -360,9 +379,10 @@ function StatusChipView({
       ? `OV: ${recalledCount} rec · no access`
       : `OV: ${recalledCount} rec · ${Math.round(pendingTokens / 1000)}k pend`;
 
-  return (
+  const chipElement = (
     <span
       className={className}
+      data-openviking-status="true"
       style={{ minWidth: 0, display: "inline-flex", position: "relative" }}
       ref={popoverRef}
     >
@@ -374,14 +394,16 @@ function StatusChipView({
         aria-expanded={isOpen}
         aria-haspopup="dialog"
         style={{
-          // Геометрия и типографика повторяют штатный чип статистики DSH:
-          // прозрачный фон, без рамки, шрифт и кегль наследуются от строки.
           boxSizing: "border-box",
           maxWidth: "100%",
-          color: themeVar("labelTertiary"),
-          font: "inherit",
+          color: isHovered
+            ? themeVar("labelSecondary")
+            : themeVar("labelTertiary"),
+          fontFamily: "var(--dsw-font-family, system-ui)",
+          fontSize: "var(--dsh-content-font-size-secondary, 13px)",
+          lineHeight:
+            "calc(20px + var(--dsh-content-font-delta-secondary, 0px))",
           fontVariantNumeric: "tabular-nums",
-          lineHeight: "inherit",
           whiteSpace: "nowrap",
           background: isHovered ? themeVar("hoverBackground") : "transparent",
           border: "none",
@@ -424,5 +446,28 @@ function StatusChipView({
         />
       )}
     </span>
+  );
+
+  if (statsHost && typeof document !== "undefined") {
+    return ReactDOM.createPortal(chipElement, statsHost);
+  }
+
+  return (
+    <div
+      style={{
+        maxWidth: "var(--dsh-chat-content-width, 748px)",
+        boxSizing: "border-box",
+        width: "100%",
+        padding: "4px calc(var(--dsh-composer-side-clearance, 0px) + 16px) 0px",
+        fontSize: "var(--dsh-content-font-size-secondary, 13px)",
+        lineHeight: "calc(20px + var(--dsh-content-font-delta-secondary, 0px))",
+        justifyContent: "center",
+        gap: "12px",
+        margin: "0 auto",
+        display: "flex",
+      }}
+    >
+      {chipElement}
+    </div>
   );
 }
