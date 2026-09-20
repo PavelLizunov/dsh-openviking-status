@@ -13,19 +13,11 @@ at-a-glance transparency into OpenViking memory management:
 - **Recalled Memories**: Count and list of the `viking://` files injected into the current conversation.
 - **Commit Trigger**: Instant "Commit To Memory Now" action button.
 
-## API key
+## Configuration & API Key
 
-If the daemon runs with `auth_mode: api_key` — check with
-`curl -s http://127.0.0.1:1933/health` — session counters are unreadable
-without a key, and the chip says `no access` rather than showing zeros. The
-browser cannot read `~/.openviking/ovcli.conf`, so supply the key once from the
-DSH devtools console:
-
-```js
-localStorage.setItem("openviking_api_key", "<your key>");
-```
-
-The key from `ovcli.conf` works. Daemons without authentication need nothing.
+- **Zero-Config Auto-Discovery**: When running locally, the plugin automatically discovers connection credentials from `~/.openviking/ovcli.conf`, `~/.openviking/ov.conf`, or the `OPENVIKING_API_KEY` environment variable.
+- **DSH Settings Integration**: Open **DSH Settings → OpenViking** to inspect connection health, run live connection tests, or customize your daemon endpoint and API token.
+- **Seamless Remote Access (Tailscale / LAN / Mobile)**: Status requests proxy through the DSH Desktop host (`/openviking-status/api/*`), ensuring the chip and popover work reliably when accessing DSH remotely without CORS or localhost conflicts.
 
 ## Architecture & Design
 
@@ -49,7 +41,7 @@ Equivalent, and useful when the registry is unreachable. Use a
 **version-pinned** URL:
 
 ```bash
-dsh plugin add https://github.com/dipertq/dsh-openviking-status/releases/download/v0.1.8/dipertq-dsh-openviking-status-0.1.8.tgz
+dsh plugin add https://github.com/dipertq/dsh-openviking-status/releases/download/v0.2.0/dipertq-dsh-openviking-status-0.2.0.tgz
 ```
 
 Not `/releases/latest/download/…`: that URL keeps its name while its content
