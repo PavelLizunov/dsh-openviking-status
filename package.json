@@ -1,6 +1,6 @@
 {
   "name": "@dipertq/dsh-openviking-status",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "Minimalist OpenViking status chip and popover for DeepSeek Harness composer",
   "type": "module",
   "repository": {
