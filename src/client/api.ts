@@ -11,6 +11,7 @@ export interface HealthStatus {
   ok: boolean;
   version?: string;
   storage?: string;
+  endpoint?: string;
   error?: string;
 }
 
@@ -73,6 +74,11 @@ export type PeerId = string;
 export const DEFAULT_OPENVIKING_ENDPOINT = "http://127.0.0.1:1933";
 
 /**
+ * Относительный маршрут хостового прокси на DSH Web Server
+ */
+export const PROXY_OPENVIKING_ENDPOINT = "/openviking-status/api";
+
+/**
  * Определение эндпоинта OpenViking из параметров, глобального контекста или localStorage
  */
 export function resolveEndpoint(endpoint?: string): string {
@@ -88,6 +94,8 @@ export function resolveEndpoint(endpoint?: string): string {
     ) {
       return win.__OPENVIKING_ENDPOINT__.trim().replace(/\/+$/, "");
     }
+    // В браузере внутри DSH запросы по умолчанию всегда идут через хостовый прокси
+    return PROXY_OPENVIKING_ENDPOINT;
   }
 
   if (typeof localStorage !== "undefined") {

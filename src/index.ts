@@ -302,7 +302,7 @@ export function apply(ctx: any, config?: OpenVikingConfig) {
           }
 
           const body = await daemonRes.json().catch(() => ({}));
-          sendJson(res, 200, body);
+          sendJson(res, 200, { ...body, endpoint: effective.endpoint });
         } catch (err) {
           sendJson(res, 502, { ok: false, healthy: false, error: String(err) });
         }

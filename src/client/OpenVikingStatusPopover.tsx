@@ -130,10 +130,13 @@ export function formatMemoryLeafName(uri: string): string {
  * Форматирование адреса эндпоинта для отображения (удаляет протокол).
  */
 export function formatEndpoint(endpoint?: string): string {
-  if (!endpoint || !endpoint.trim()) {
+  if (!endpoint || !endpoint.trim() || endpoint.startsWith("/")) {
     return "127.0.0.1:1933";
   }
-  return endpoint.trim().replace(/^https?:\/\//, "");
+  return endpoint
+    .trim()
+    .replace(/^https?:\/\//, "")
+    .replace(/\/+$/, "");
 }
 
 /**
@@ -302,7 +305,7 @@ export function OpenVikingStatusPopover({
             data-testid="endpoint-label"
             style={{ ...mutedStyle, ...monoStyle, fontWeight: 400 }}
           >
-            {formatEndpoint(endpoint)}
+            {formatEndpoint(health?.endpoint || endpoint)}
           </span>
         </span>
 
@@ -476,7 +479,7 @@ export function OpenVikingStatusPopover({
           }}
         >
           {unauthorized
-            ? "The daemon requires an API key. Set openviking_api_key in localStorage to read session counters."
+            ? "The daemon requires an API key. Configure it in DSH Settings → OpenViking."
             : "Session counters are unavailable right now."}
         </div>
       )}
