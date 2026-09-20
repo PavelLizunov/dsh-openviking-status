@@ -117,6 +117,37 @@ export function formatBacklog(
 }
 
 /**
+ * Сводка по выполняемой задаче: количество активных/в очереди, короткий ID и таймер.
+ */
+export function formatExtractionRunningInfo(
+  breakdown: ExtractionBreakdown,
+  elapsedSec: number
+): {
+  taskLabel: string;
+  timerLabel: string;
+} {
+  const active = breakdown.running;
+  const pending = breakdown.pending;
+  const shortId = breakdown.firstRunning?.task_id
+    ? `#${breakdown.firstRunning.task_id.replace(/^task-/, "").slice(0, 8)}`
+    : null;
+
+  const queuePart = `${active} active${pending > 0 ? `, ${pending} queued` : ""}`;
+  const taskLabel = shortId ? `${queuePart} (${shortId})` : queuePart;
+
+  const lastDuration = breakdown.lastCompleted
+    ? formatDuration(
+        breakdown.lastCompleted.created_at,
+        breakdown.lastCompleted.updated_at
+      )
+    : undefined;
+
+  const timerLabel = `${elapsedSec}s${lastDuration ? ` (last ~${lastDuration})` : ""}`;
+
+  return { taskLabel, timerLabel };
+}
+
+/**
  * Расчет процента заполнения пула накопленных токенов (0% - 100%).
  */
 export function getProgressBarPercent(
@@ -264,14 +295,31 @@ export function ExtractionSection({
   const [events, setEvents] = useState<ExecutionEvent[] | null>(null);
   const [logError, setLogError] = useState<string | null>(null);
   const [loadingLog, setLoadingLog] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
+
+  const isRunning = (breakdown?.running ?? 0) >= 1;
+
+  useEffect(() => {
+    if (!isRunning) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [isRunning]);
 
   if (!breakdown) return null;
 
-  const isRunning = breakdown.running >= 1;
   const lastCompleted = breakdown.lastCompleted;
   const lastFailed = breakdown.lastFailed;
   const backlog = formatBacklog(breakdown);
   const failedActive = !isRunning && breakdown.failed >= 1;
+
+  const startedMs = breakdown.firstRunning?.created_at
+    ? new Date(breakdown.firstRunning.created_at).getTime()
+    : null;
+  const elapsedSec =
+    startedMs && !Number.isNaN(startedMs)
+      ? Math.max(0, Math.floor((now - startedMs) / 1000))
+      : 0;
+  const runningInfo = formatExtractionRunningInfo(breakdown, elapsedSec);
 
   // Задача для «Show log»: то, что показано в блоке — живое извлечение важнее
   // прошлых итогов, поэтому running-задача имеет приоритет. Так лента
@@ -328,23 +376,57 @@ export function ExtractionSection({
             style={{
               display: "flex",
               alignItems: "center",
-              gap: "6px",
+              justifyContent: "space-between",
               marginBottom: "4px",
+              gap: "8px",
             }}
           >
-            <span
-              data-testid="extraction-status-dot"
-              aria-hidden="true"
+            <div
               style={{
-                width: "6px",
-                height: "6px",
-                borderRadius: "50%",
-                background: themeVar("stateSuccess"),
-                animation: "ov-pulse 1.2s ease-in-out infinite",
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                minWidth: 0,
+              }}
+            >
+              <span
+                data-testid="extraction-status-dot"
+                aria-hidden="true"
+                style={{
+                  width: "6px",
+                  height: "6px",
+                  borderRadius: "50%",
+                  background: themeVar("stateSuccess"),
+                  animation: "ov-pulse 1.2s ease-in-out infinite",
+                  flexShrink: 0,
+                }}
+              />
+              <span data-testid="extraction-running-label">Extracting…</span>
+              <span
+                data-testid="extraction-task-count"
+                style={{
+                  ...mutedStyle,
+                  fontSize: "11px",
+                  fontVariantNumeric: "tabular-nums",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {runningInfo.taskLabel}
+              </span>
+            </div>
+
+            <div
+              data-testid="extraction-elapsed-timer"
+              style={{
+                ...mutedStyle,
+                fontSize: "11px",
+                fontVariantNumeric: "tabular-nums",
+                whiteSpace: "nowrap",
                 flexShrink: 0,
               }}
-            />
-            <span data-testid="extraction-running-label">Extracting…</span>
+            >
+              {runningInfo.timerLabel}
+            </div>
           </div>
           <div
             data-testid="extraction-indeterminate-track"
@@ -443,7 +525,11 @@ export function ExtractionSection({
             }}
             aria-expanded={showLog}
           >
-            {showLog ? "Hide log" : "Show log"}
+            {showLog
+              ? "Hide log"
+              : events && events.length > 0
+                ? `Show log (${events.length})`
+                : "Show log"}
           </button>
 
           {showLog && (

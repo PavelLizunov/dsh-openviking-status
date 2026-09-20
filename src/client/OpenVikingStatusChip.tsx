@@ -19,7 +19,10 @@ import {
 } from "./api";
 import { themeVar } from "./theme";
 import { RecalledMemoriesResult, parseRecalledMemories } from "./recallParser";
-import { OpenVikingStatusPopover } from "./OpenVikingStatusPopover";
+import {
+  OpenVikingStatusPopover,
+  formatDuration,
+} from "./OpenVikingStatusPopover";
 
 export const COMMIT_THRESHOLD = 20000;
 
@@ -220,12 +223,14 @@ export function formatTooltipTitle({
   recalledCount,
   pendingTokens,
   sessionUnreadable = false,
+  breakdown,
 }: {
   isOnline: boolean;
   isCommitting?: boolean;
   recalledCount: number;
   pendingTokens: number;
   sessionUnreadable?: boolean;
+  breakdown?: ExtractionBreakdown | null;
 }): string {
   if (!isOnline) {
     return "OpenViking: Offline";
@@ -237,6 +242,19 @@ export function formatTooltipTitle({
   const tokenLabel = `${(pendingTokens || 0).toLocaleString()} pending tokens`;
   if (isCommitting) {
     return `OpenViking: Committing... (${countLabel}, ${tokenLabel})`;
+  }
+  if (breakdown && breakdown.running >= 1) {
+    const queueInfo = `${breakdown.running} active${
+      breakdown.pending > 0 ? `, ${breakdown.pending} queued` : ""
+    }`;
+    const lastDuration = breakdown.lastCompleted
+      ? formatDuration(
+          breakdown.lastCompleted.created_at,
+          breakdown.lastCompleted.updated_at
+        )
+      : undefined;
+    const est = lastDuration ? ` · last took ~${lastDuration}` : "";
+    return `OpenViking: Extracting memories (${queueInfo}${est} · ${countLabel}, ${tokenLabel})`;
   }
   return `OpenViking: Online (${countLabel}, ${tokenLabel})`;
 }
@@ -550,6 +568,7 @@ function StatusChipView({
     recalledCount,
     pendingTokens,
     sessionUnreadable,
+    breakdown,
   });
 
   /** Текст справа от индикатора. */

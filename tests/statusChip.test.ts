@@ -86,6 +86,32 @@ describe("formatTooltipTitle", () => {
       "OpenViking: Committing... (12 recalled, 3,450 pending tokens)"
     );
   });
+
+  it("formats tooltip when extraction is running", () => {
+    assert.strictEqual(
+      formatTooltipTitle({
+        isOnline: true,
+        recalledCount: 12,
+        pendingTokens: 3450,
+        breakdown: {
+          running: 1,
+          pending: 2,
+          completed: 1,
+          failed: 0,
+          total: 3,
+          firstRunning: { task_id: "t1", status: "running" },
+          lastCompleted: {
+            task_id: "t0",
+            status: "completed",
+            created_at: "2026-01-01T00:00:00Z",
+            updated_at: "2026-01-01T00:00:33Z",
+          },
+          lastFailed: null,
+        },
+      }),
+      "OpenViking: Extracting memories (1 active, 2 queued · last took ~33s · 12 recalled, 3,450 pending tokens)"
+    );
+  });
 });
 
 describe("getStatusIndicatorColor", () => {

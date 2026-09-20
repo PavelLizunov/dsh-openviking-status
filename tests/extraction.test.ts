@@ -17,6 +17,7 @@ import {
   shouldPollActive,
   formatDuration,
   formatExtractionSummary,
+  formatExtractionRunningInfo,
   formatBacklog,
   ExtractionSection,
   OpenVikingStatusPopover,
@@ -462,6 +463,55 @@ describe("formatBacklog", () => {
   });
 });
 
+describe("formatExtractionRunningInfo", () => {
+  it("formats running count, queued count, and short task id", () => {
+    const info = formatExtractionRunningInfo(
+      {
+        running: 1,
+        pending: 2,
+        completed: 0,
+        failed: 0,
+        total: 3,
+        firstRunning: {
+          task_id: "e1b28bd6-6aa3-49d9-af3d-e17760d1fdaf",
+          status: "running",
+        },
+        lastCompleted: null,
+        lastFailed: null,
+      },
+      14
+    );
+    assert.strictEqual(info.taskLabel, "1 active, 2 queued (#e1b28bd6)");
+    assert.strictEqual(info.timerLabel, "14s");
+  });
+
+  it("includes last duration reference when lastCompleted exists", () => {
+    const info = formatExtractionRunningInfo(
+      {
+        running: 1,
+        pending: 0,
+        completed: 1,
+        failed: 0,
+        total: 2,
+        firstRunning: {
+          task_id: "task-abc12345",
+          status: "running",
+        },
+        lastCompleted: {
+          task_id: "t0",
+          status: "completed",
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:32Z",
+        },
+        lastFailed: null,
+      },
+      8
+    );
+    assert.strictEqual(info.taskLabel, "1 active (#abc12345)");
+    assert.strictEqual(info.timerLabel, "8s (last ~32s)");
+  });
+});
+
 describe("normalizeExecutionEvent", () => {
   it("preserves seq/status/timestamps and null stage/operation/error", () => {
     const ev = normalizeExecutionEvent({
@@ -504,6 +554,9 @@ describe("ExtractionSection rendering", () => {
     );
     assert.match(html, /Extracting/);
     assert.match(html, /extraction-indeterminate-fill/);
+    assert.match(html, /extraction-task-count/);
+    assert.match(html, /1 active, 2 queued/);
+    assert.match(html, /extraction-elapsed-timer/);
     // Никакого фейкового процента.
     assert.doesNotMatch(html, /width:40%[\s\S]*%<\/span>/);
   });
