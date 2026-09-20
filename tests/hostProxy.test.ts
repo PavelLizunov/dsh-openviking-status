@@ -116,6 +116,13 @@ function createMockContext(
     },
     webServer: {
       register(route: MockRoute) {
+        if (
+          routes.some((r) => r.kind === route.kind && r.path === route.path)
+        ) {
+          throw new Error(
+            `webserver: duplicate ${route.kind} route "${route.path}"`
+          );
+        }
         routes.push(route);
       },
     },

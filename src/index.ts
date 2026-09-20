@@ -114,13 +114,67 @@ export function apply(ctx: any, config?: OpenVikingConfig) {
     return headers;
   }
 
-  // GET /openviking-status/api/config
+  // GET & POST /openviking-status/api/config
   ctx.effect?.(() => {
     return ctx.webServer?.register({
       kind: "exact",
       path: `${API_PREFIX}/config`,
-      handler: async (_req: any, res: any) => {
+      handler: async (req: any, res: any) => {
         try {
+          if (req.method === "POST") {
+            const body = await readJson(req);
+            const settings =
+              settingsService || ctx.get?.("settings") || ctx.settings;
+
+            if (!settings) {
+              sendJson(res, 503, { error: "Settings service unavailable" });
+              return;
+            }
+
+            if (body.reset) {
+              await settings.mutate(NS, [
+                { op: "unset", path: ["endpoint"] },
+                { op: "unset", path: ["apiKey"] },
+              ]);
+              sendJson(res, 200, { ok: true, reset: true });
+              return;
+            }
+
+            const ops: any[] = [];
+            if (
+              typeof body.endpoint === "string" &&
+              body.endpoint.trim().length > 0
+            ) {
+              const ep = body.endpoint.trim();
+              if (!ep.startsWith("http://") && !ep.startsWith("https://")) {
+                sendJson(res, 400, {
+                  error: "Endpoint must start with http:// or https://",
+                });
+                return;
+              }
+              ops.push({
+                op: "set",
+                path: ["endpoint"],
+                value: ep.replace(/\/+$/, ""),
+              });
+            }
+            if (typeof body.apiKey === "string") {
+              ops.push({
+                op: "set",
+                path: ["apiKey"],
+                value: body.apiKey.trim(),
+              });
+            }
+
+            if (ops.length > 0) {
+              await settings.mutate(NS, ops);
+            }
+
+            sendJson(res, 200, { ok: true, config: resolveEffective() });
+            return;
+          }
+
+          // GET /openviking-status/api/config
           const effective = resolveEffective();
           const maskedApiKey = effective.apiKey
             ? effective.apiKey.length > 8
@@ -139,75 +193,7 @@ export function apply(ctx: any, config?: OpenVikingConfig) {
         }
       },
     });
-  }, "openviking-status: config read route");
-
-  // POST /openviking-status/api/config
-  ctx.effect?.(() => {
-    return ctx.webServer?.register({
-      kind: "exact",
-      path: `${API_PREFIX}/config`,
-      handler: async (req: any, res: any) => {
-        try {
-          if (req.method !== "POST") {
-            sendJson(res, 405, { error: "Method not allowed" });
-            return;
-          }
-
-          const body = await readJson(req);
-          const settings =
-            settingsService || ctx.get?.("settings") || ctx.settings;
-
-          if (!settings) {
-            sendJson(res, 503, { error: "Settings service unavailable" });
-            return;
-          }
-
-          if (body.reset) {
-            await settings.mutate(NS, [
-              { op: "unset", path: ["endpoint"] },
-              { op: "unset", path: ["apiKey"] },
-            ]);
-            sendJson(res, 200, { ok: true, reset: true });
-            return;
-          }
-
-          const ops: any[] = [];
-          if (
-            typeof body.endpoint === "string" &&
-            body.endpoint.trim().length > 0
-          ) {
-            const ep = body.endpoint.trim();
-            if (!ep.startsWith("http://") && !ep.startsWith("https://")) {
-              sendJson(res, 400, {
-                error: "Endpoint must start with http:// or https://",
-              });
-              return;
-            }
-            ops.push({
-              op: "set",
-              path: ["endpoint"],
-              value: ep.replace(/\/+$/, ""),
-            });
-          }
-          if (typeof body.apiKey === "string") {
-            ops.push({
-              op: "set",
-              path: ["apiKey"],
-              value: body.apiKey.trim(),
-            });
-          }
-
-          if (ops.length > 0) {
-            await settings.mutate(NS, ops);
-          }
-
-          sendJson(res, 200, { ok: true, config: resolveEffective() });
-        } catch (err) {
-          sendJson(res, 500, { error: String(err) });
-        }
-      },
-    });
-  }, "openviking-status: config update route");
+  }, "openviking-status: config route");
 
   // POST /openviking-status/api/test-connection
   ctx.effect?.(() => {
