@@ -553,9 +553,14 @@ function StatusChipView({
 
   const isOnline = health?.ok === true;
   const sessionData = sessionRead?.status === "ok" ? sessionRead.session : null;
-  // Отказ авторизации или недоступность — это «неизвестно», а не «ноль».
+  // Отказ авторизации или сетевой сбой — это «недоступно» (warning).
+  // "missing" означает свежую сессию, ещё не закоммиченную в OpenViking (0 токенов).
   const sessionUnreadable =
-    isOnline && sessionRead !== null && sessionRead.status !== "ok";
+    isOnline &&
+    sessionRead !== null &&
+    (sessionRead.status === "unauthorized" ||
+      sessionRead.status === "unreachable" ||
+      sessionRead.status === "error");
   const pendingTokens = sessionData?.pending_tokens ?? 0;
   const recalledCount = recalledResult.recalledCount;
 
@@ -669,7 +674,7 @@ function StatusChipView({
           sessionData={sessionData}
           sessionRead={sessionRead}
           recalledResult={recalledResult}
-          endpoint={apiClient.endpoint}
+          endpoint={health?.endpoint || apiClient.endpoint}
           isCommitting={isCommitting}
           commitError={commitError}
           breakdown={breakdown}

@@ -619,7 +619,11 @@ export function OpenVikingStatusPopover({
 
   const isOnline = health?.ok === true;
   const sessionUnreadable =
-    isOnline && sessionRead != null && sessionRead.status !== "ok";
+    isOnline &&
+    sessionRead != null &&
+    (sessionRead.status === "unauthorized" ||
+      sessionRead.status === "unreachable" ||
+      sessionRead.status === "error");
   const unauthorized = sessionRead?.status === "unauthorized";
 
   const statusColor = isOnline

@@ -513,11 +513,15 @@ export class OpenVikingClient {
             body.status === "healthy" ||
             res.ok);
 
-        return {
+        const resObj: HealthStatus = {
           ok: isOk,
           version: typeof body.version === "string" ? body.version : undefined,
           storage: typeof body.storage === "string" ? body.storage : undefined,
         };
+        if (typeof body.endpoint === "string") {
+          resObj.endpoint = body.endpoint;
+        }
+        return resObj;
       } catch (err) {
         return {
           ok: false,
@@ -551,11 +555,15 @@ export class OpenVikingClient {
           body.status === "healthy" ||
           res.ok);
 
-      return {
+      const resObj: HealthStatus = {
         ok: isOk,
         version: typeof body.version === "string" ? body.version : undefined,
         storage: typeof body.storage === "string" ? body.storage : undefined,
       };
+      if (typeof body.endpoint === "string") {
+        resObj.endpoint = body.endpoint;
+      }
+      return resObj;
     } catch (err) {
       return {
         ok: false,
