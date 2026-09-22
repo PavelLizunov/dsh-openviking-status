@@ -36,7 +36,7 @@ function startMockDaemon(): Promise<{
         return;
       }
 
-      if (req.url?.startsWith("/api/v1/sessions/dsh-session-123")) {
+      if (req.url?.startsWith("/api/v1/sessions/")) {
         if (!req.headers.authorization) {
           res.writeHead(401, { "Content-Type": "application/json" });
           res.end(
@@ -133,13 +133,18 @@ async function invokeHandler(
   route: MockRoute,
   method: string,
   url: string,
-  body?: any
+  body?: any,
+  headers: Record<string, string> = {}
 ): Promise<{ status: number; body: any }> {
   return new Promise((resolve) => {
     const req = {
       method,
       url,
-      headers: { "content-type": "application/json" },
+      headers: {
+        host: "localhost:3080",
+        "content-type": "application/json",
+        ...headers,
+      },
       [Symbol.asyncIterator]: async function* () {
         if (body) {
           yield JSON.stringify(body);

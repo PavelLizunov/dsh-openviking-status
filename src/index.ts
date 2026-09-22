@@ -1,7 +1,13 @@
 import z from "@deepseek-ai/schemastery";
 import { resolveHostCredentials } from "./credentials.js";
+import {
+  enforceTrustFence,
+  validateEndpointUrl,
+  isLoopbackHost,
+} from "./trustFence.js";
 
 export * from "./credentials.js";
+export * from "./trustFence.js";
 export const name = "@dipertq/dsh-openviking-status";
 export const inject = ["webServer"];
 
@@ -18,10 +24,113 @@ export type OpenVikingConfig = {
   apiKey?: string;
 };
 
+export interface AuthProbeResult {
+  authState:
+    | "authenticated"
+    | "unauthorized"
+    | "forbidden"
+    | "not_found"
+    | "server_error"
+    | "unreachable"
+    | "unexpected_status";
+  httpStatus: number | null;
+  reason: string;
+}
+
+export function classifyAuthProbe(
+  status: number | null | undefined
+): AuthProbeResult {
+  if (
+    status === null ||
+    status === undefined ||
+    typeof status !== "number" ||
+    status === 0
+  ) {
+    return {
+      authState: "unreachable",
+      httpStatus: null,
+      reason: "Network error or timeout",
+    };
+  }
+  if (status >= 200 && status < 300) {
+    return {
+      authState: "authenticated",
+      httpStatus: status,
+      reason: "Credentials verified",
+    };
+  }
+  if (status === 401) {
+    return {
+      authState: "unauthorized",
+      httpStatus: 401,
+      reason: "Credentials rejected or missing",
+    };
+  }
+  if (status === 403) {
+    return {
+      authState: "forbidden",
+      httpStatus: 403,
+      reason: "Access forbidden",
+    };
+  }
+  if (status === 404) {
+    return {
+      authState: "not_found",
+      httpStatus: 404,
+      reason: "Endpoint or route not found; auth unverified",
+    };
+  }
+  if (status >= 500 && status < 600) {
+    return {
+      authState: "server_error",
+      httpStatus: status,
+      reason: `Server error ${status}; auth unknown`,
+    };
+  }
+  return {
+    authState: "unexpected_status",
+    httpStatus: status,
+    reason: `Unexpected HTTP ${status}`,
+  };
+}
+
+function maskApiKey(key: string | undefined): string | undefined {
+  if (!key || typeof key !== "string") return undefined;
+  const trimmed = key.trim();
+  if (trimmed.length <= 8) return "••••••••";
+  return `${trimmed.slice(0, 4)}••••${trimmed.slice(-4)}`;
+}
+
+export function redactConfigDto(effective: {
+  endpoint: string;
+  apiKey?: string;
+  source: string;
+}): {
+  endpoint: string;
+  hasApiKey: boolean;
+  apiKeyPresent: boolean;
+  apiKeyHint?: string;
+  maskedApiKey?: string;
+  source: string;
+} {
+  const masked = maskApiKey(effective.apiKey);
+  return {
+    endpoint: effective.endpoint,
+    hasApiKey: Boolean(effective.apiKey),
+    apiKeyPresent: Boolean(effective.apiKey),
+    apiKeyHint: masked,
+    maskedApiKey: masked,
+    source: effective.source,
+  };
+}
+
 async function readJson(req: any): Promise<Record<string, any>> {
   let data = "";
   for await (const chunk of req) {
     data += chunk;
+    if (data.length > 1024 * 64) {
+      throw new Error("Payload Too Large: body exceeded 64KB");
+    }
   }
   try {
     return data ? JSON.parse(data) : {};
@@ -57,28 +166,15 @@ function getCandidateSessionIds(sessionId: string): string[] {
   return Array.from(new Set(candidates));
 }
 
-/** Верхняя граница `limit` у демона (`INVALID_ARGUMENT` за пределом). */
 const TASKS_LIMIT_CAP = 200;
-
-/** Тип фоновой задачи Phase 2, извлекающей память из архива сессии. */
 const SESSION_COMMIT_TASK_TYPE = "session_commit";
 
-/**
- * Прижать `limit` к диапазону `[1, 200]`. Демон отвергает более крупные
- * значения с `INVALID_ARGUMENT`, поэтому клэмп делает прокси, а не клиент.
- */
 function clampLimit(raw: unknown, fallback = TASKS_LIMIT_CAP): number {
   const n = typeof raw === "string" ? Number.parseInt(raw, 10) : Number(raw);
   if (!Number.isFinite(n) || n <= 0) return fallback;
   return Math.min(TASKS_LIMIT_CAP, Math.max(1, Math.floor(n)));
 }
 
-/**
- * Достать идентификатор задачи из ответа демона на коммит.
- *
- * Демон кладёт его то в корень (`task_id`), то во вложенный `result`/`data`,
- * поэтому проверяем оба уровня и обе формы имени (`task_id` / `id`).
- */
 function extractTaskId(body: Record<string, unknown> | null): string | null {
   if (!body || typeof body !== "object") return null;
   const containers = [
@@ -94,12 +190,6 @@ function extractTaskId(body: Record<string, unknown> | null): string | null {
   return null;
 }
 
-/**
- * Извлечь массив сырых задач из ответа демона OpenViking.
- *
- * OpenViking GET /api/v1/tasks возвращает `{ status: "ok", result: [ ... ] }`,
- * где `result` — сам массив задач.
- */
 function extractTaskItems(data: unknown): unknown[] {
   if (!data || typeof data !== "object") return [];
   if (Array.isArray(data)) return data;
@@ -115,14 +205,6 @@ function extractTaskItems(data: unknown): unknown[] {
   return [];
 }
 
-/**
- * Разрешить идентификатор сессии в существующий `resource_id` формы
- * `dsh-session-<uuid>`.
- *
- * Фильтр задач по `resource_id` — exact match, поэтому берём первый кандидат,
- * который демон подтверждает через `GET /sessions/{id}`. Переиспользует ту же
- * логику кандидатов, что и чтение сессии.
- */
 async function resolveResourceId(
   endpoint: string,
   headers: Record<string, string>,
@@ -152,9 +234,6 @@ export function apply(ctx: any, config?: OpenVikingConfig) {
   let currentSettings = () => config ?? {};
   let settingsService: any = null;
 
-  // Кэш разрешения sessionId → resource_id (dsh-session-*). Опрос задач идёт
-  // каждые ~2.5с в активной фазе, а форма id стабильна на всю сессию — без
-  // кэша прокси делал бы лишний session-probe на каждый тик.
   const resourceIdCache = new Map<string, string>();
 
   // Attach to DSH settings if available
@@ -210,12 +289,14 @@ export function apply(ctx: any, config?: OpenVikingConfig) {
     return headers;
   }
 
-  // GET & POST /openviking-status/api/config
+  // GET & POST /openviking-status/api/config (V1 & V2 & V4 Fixed)
   ctx.effect?.(() => {
     return ctx.webServer?.register({
       kind: "exact",
       path: `${API_PREFIX}/config`,
       handler: async (req: any, res: any) => {
+        if (!enforceTrustFence(req, res)) return;
+
         try {
           if (req.method === "POST") {
             const body = await readJson(req);
@@ -232,29 +313,56 @@ export function apply(ctx: any, config?: OpenVikingConfig) {
                 { op: "unset", path: ["endpoint"] },
                 { op: "unset", path: ["apiKey"] },
               ]);
-              sendJson(res, 200, { ok: true, reset: true });
+              sendJson(res, 200, {
+                ok: true,
+                reset: true,
+                config: redactConfigDto(resolveEffective()),
+              });
               return;
             }
 
             const ops: any[] = [];
+            const effective = resolveEffective();
+            let newEndpoint = effective.endpoint;
+            let originChanged = false;
+
             if (
               typeof body.endpoint === "string" &&
               body.endpoint.trim().length > 0
             ) {
-              const ep = body.endpoint.trim();
-              if (!ep.startsWith("http://") && !ep.startsWith("https://")) {
-                sendJson(res, 400, {
-                  error: "Endpoint must start with http:// or https://",
-                });
-                return;
-              }
+              newEndpoint = validateEndpointUrl(body.endpoint);
+              const newOrigin = new URL(newEndpoint).origin;
+              const oldOrigin = (() => {
+                try {
+                  return new URL(effective.endpoint).origin;
+                } catch {
+                  return null;
+                }
+              })();
+              originChanged = newOrigin !== oldOrigin;
               ops.push({
                 op: "set",
                 path: ["endpoint"],
-                value: ep.replace(/\/+$/, ""),
+                value: newEndpoint,
               });
             }
-            if (typeof body.apiKey === "string") {
+
+            // V2 FIX: Endpoint-Credential Binding across config updates
+            if (originChanged) {
+              if (
+                typeof body.apiKey === "string" &&
+                body.apiKey.trim().length > 0
+              ) {
+                ops.push({
+                  op: "set",
+                  path: ["apiKey"],
+                  value: body.apiKey.trim(),
+                });
+              } else {
+                // Clear the key if endpoint origin changed and no key provided for new origin
+                ops.push({ op: "unset", path: ["apiKey"] });
+              }
+            } else if (typeof body.apiKey === "string") {
               ops.push({
                 op: "set",
                 path: ["apiKey"],
@@ -266,60 +374,78 @@ export function apply(ctx: any, config?: OpenVikingConfig) {
               await settings.mutate(NS, ops);
             }
 
-            sendJson(res, 200, { ok: true, config: resolveEffective() });
+            // V1 FIX: Return redacted DTO, NEVER raw apiKey
+            sendJson(res, 200, {
+              ok: true,
+              config: redactConfigDto(resolveEffective()),
+            });
             return;
           }
 
           // GET /openviking-status/api/config
-          const effective = resolveEffective();
-          const maskedApiKey = effective.apiKey
-            ? effective.apiKey.length > 8
-              ? `${effective.apiKey.slice(0, 4)}••••${effective.apiKey.slice(-4)}`
-              : "••••••••"
-            : undefined;
-
-          sendJson(res, 200, {
-            endpoint: effective.endpoint,
-            hasApiKey: Boolean(effective.apiKey),
-            maskedApiKey,
-            source: effective.source,
-          });
-        } catch (err) {
-          sendJson(res, 500, { error: String(err) });
+          // V1 FIX: Always return redacted DTO without raw secrets
+          sendJson(res, 200, redactConfigDto(resolveEffective()));
+        } catch (err: any) {
+          sendJson(res, 500, { ok: false, error: err.message || String(err) });
         }
       },
     });
   }, "openviking-status: config route");
 
-  // POST /openviking-status/api/test-connection
+  // POST /openviking-status/api/test-connection (V2 & V3 & V4 Fixed)
   ctx.effect?.(() => {
     return ctx.webServer?.register({
       kind: "exact",
       path: `${API_PREFIX}/test-connection`,
       handler: async (req: any, res: any) => {
+        if (!enforceTrustFence(req, res)) return;
+
         try {
           const body = await readJson(req);
           const effective = resolveEffective();
-          const targetUrl =
-            (body.endpoint &&
-              String(body.endpoint).trim().replace(/\/+$/, "")) ||
-            effective.endpoint;
-          const targetKey =
-            typeof body.apiKey === "string"
-              ? body.apiKey.trim()
-              : effective.apiKey;
 
+          // Validate target URL against scheme and metadata SSRF
+          let targetUrl = effective.endpoint;
+          let isCustomEndpoint = false;
+
+          if (body.endpoint && String(body.endpoint).trim().length > 0) {
+            targetUrl = validateEndpointUrl(body.endpoint);
+            const targetOrigin = new URL(targetUrl).origin;
+            const effectiveOrigin = new URL(effective.endpoint).origin;
+            isCustomEndpoint = targetOrigin !== effectiveOrigin;
+          }
+
+          // V2 FIX: Strict Endpoint-Credential Binding
+          // If custom endpoint -> use body.apiKey if provided, otherwise undefined (NEVER saved key)
+          const targetKey =
+            typeof body.apiKey === "string" && body.apiKey.trim().length > 0
+              ? body.apiKey.trim()
+              : isCustomEndpoint
+                ? undefined
+                : effective.apiKey;
+
+          // Probe health with redirect: 'error'
           const healthRes = await fetch(`${targetUrl}/health`, {
             method: "GET",
             headers: getHeaders(targetKey),
+            redirect: "error",
+            signal: AbortSignal.timeout(5000),
           }).catch(
             (err) => ({ ok: false, status: 0, statusText: err.message }) as any
           );
 
           if (!healthRes.ok) {
+            // V3 FIX: Classify HTTP 500/4xx properly
+            const healthProbe = classifyAuthProbe(healthRes.status || 0);
             sendJson(res, 200, {
               ok: false,
               authenticated: false,
+              authState: healthProbe.authState,
+              httpStatus: healthRes.status || null,
+              reason:
+                healthRes.status === 0
+                  ? `Connection failed: ${healthRes.statusText}`
+                  : `HTTP ${healthRes.status}`,
               error:
                 healthRes.status === 0
                   ? `Connection failed: ${healthRes.statusText}`
@@ -332,23 +458,22 @@ export function apply(ctx: any, config?: OpenVikingConfig) {
             .json()
             .catch(() => ({}))) as Record<string, unknown>;
 
-          // Probe authorization against session endpoint
+          // V3 FIX: Probe authorization against session endpoint with refined classification
           const probeCandidate = "dsh-session-test-probe";
           const authProbe = await fetch(
             `${targetUrl}/api/v1/sessions/${probeCandidate}`,
             {
               method: "GET",
               headers: getHeaders(targetKey),
+              redirect: "error",
+              signal: AbortSignal.timeout(5000),
             }
-          ).catch(() => null);
+          ).catch((err) => ({ status: 0, statusText: err.message }) as any);
 
-          let authenticated = true;
-          if (
-            authProbe &&
-            (authProbe.status === 401 || authProbe.status === 403)
-          ) {
-            authenticated = false;
-          }
+          const probeResult = classifyAuthProbe(
+            authProbe ? authProbe.status : 0
+          );
+          const isAuthenticated = probeResult.authState === "authenticated";
 
           sendJson(res, 200, {
             ok: true,
@@ -360,13 +485,14 @@ export function apply(ctx: any, config?: OpenVikingConfig) {
               typeof healthData.storage === "string"
                 ? healthData.storage
                 : undefined,
-            authenticated,
-            error: authenticated
-              ? undefined
-              : "Daemon reachable, but API key is missing or invalid (HTTP 401)",
+            authState: probeResult.authState,
+            httpStatus: probeResult.httpStatus,
+            reason: probeResult.reason,
+            authenticated: isAuthenticated,
+            error: isAuthenticated ? undefined : probeResult.reason,
           });
-        } catch (err) {
-          sendJson(res, 500, { ok: false, error: String(err) });
+        } catch (err: any) {
+          sendJson(res, 400, { ok: false, error: err.message || String(err) });
         }
       },
     });
@@ -377,12 +503,16 @@ export function apply(ctx: any, config?: OpenVikingConfig) {
     return ctx.webServer?.register({
       kind: "exact",
       path: `${API_PREFIX}/health`,
-      handler: async (_req: any, res: any) => {
+      handler: async (req: any, res: any) => {
+        if (!enforceTrustFence(req, res)) return;
+
         try {
           const effective = resolveEffective();
           const daemonRes = await fetch(`${effective.endpoint}/health`, {
             method: "GET",
             headers: getHeaders(effective.apiKey),
+            redirect: "error",
+            signal: AbortSignal.timeout(5000),
           }).catch(
             (err) =>
               ({ ok: false, status: 502, statusText: err.message }) as any
@@ -412,6 +542,8 @@ export function apply(ctx: any, config?: OpenVikingConfig) {
       kind: "exact",
       path: `${API_PREFIX}/session`,
       handler: async (req: any, res: any) => {
+        if (!enforceTrustFence(req, res)) return;
+
         try {
           const url = new URL(req.url || "/", "http://localhost");
           const sessionId = url.searchParams.get("id");
@@ -433,6 +565,8 @@ export function apply(ctx: any, config?: OpenVikingConfig) {
               {
                 method: "GET",
                 headers: getHeaders(effective.apiKey),
+                redirect: "error",
+                signal: AbortSignal.timeout(5000),
               }
             ).catch(() => null);
 
@@ -513,6 +647,8 @@ export function apply(ctx: any, config?: OpenVikingConfig) {
       kind: "exact",
       path: `${API_PREFIX}/session/commit`,
       handler: async (req: any, res: any) => {
+        if (!enforceTrustFence(req, res)) return;
+
         try {
           const body = await readJson(req);
           const sessionId = body.sessionId;
@@ -535,6 +671,8 @@ export function apply(ctx: any, config?: OpenVikingConfig) {
                 method: "POST",
                 headers: getHeaders(effective.apiKey),
                 body: payload,
+                redirect: "error",
+                signal: AbortSignal.timeout(10000),
               }
             ).catch(() => null);
 
@@ -554,9 +692,6 @@ export function apply(ctx: any, config?: OpenVikingConfig) {
               return;
             }
 
-            // Commit демона двухфазный: тело ответа несёт `task_id` фоновой
-            // задачи извлечения (Phase 2). Пробрасываем его, чтобы чип мог
-            // мгновенно привязаться к задаче, не дожидаясь следующего опроса.
             const okBody = (await daemonRes.json().catch(() => null)) as Record<
               string,
               unknown
@@ -581,14 +716,14 @@ export function apply(ctx: any, config?: OpenVikingConfig) {
     });
   }, "openviking-status: session commit proxy route");
 
-  // GET /openviking-status/api/tasks?session=<id>&limit=<n>
-  // Разрешает id в resource_id (dsh-session-*) и отдаёт список задач Phase 2
-  // одним запросом. Разбивка по статусам считается на клиенте.
+  // GET /openviking-status/api/tasks
   ctx.effect?.(() => {
     return ctx.webServer?.register({
       kind: "exact",
       path: `${API_PREFIX}/tasks`,
       handler: async (req: any, res: any) => {
+        if (!enforceTrustFence(req, res)) return;
+
         try {
           const url = new URL(req.url || "/", "http://localhost");
           const sessionId = url.searchParams.get("session");
@@ -620,7 +755,12 @@ export function apply(ctx: any, config?: OpenVikingConfig) {
 
           const daemonRes = await fetch(
             `${effective.endpoint}/api/v1/tasks?${query.toString()}`,
-            { method: "GET", headers }
+            {
+              method: "GET",
+              headers,
+              redirect: "error",
+              signal: AbortSignal.timeout(10000),
+            }
           ).catch(() => null);
 
           if (!daemonRes) {
@@ -658,13 +798,14 @@ export function apply(ctx: any, config?: OpenVikingConfig) {
     });
   }, "openviking-status: tasks proxy route");
 
-  // GET /openviking-status/api/task?id=<id>&events=1
-  // Лениво тянет одну задачу с лентой execution_events для «Show log».
+  // GET /openviking-status/api/task
   ctx.effect?.(() => {
     return ctx.webServer?.register({
       kind: "exact",
       path: `${API_PREFIX}/task`,
       handler: async (req: any, res: any) => {
+        if (!enforceTrustFence(req, res)) return;
+
         try {
           const url = new URL(req.url || "/", "http://localhost");
           const taskId = url.searchParams.get("id");
@@ -682,7 +823,12 @@ export function apply(ctx: any, config?: OpenVikingConfig) {
             `${effective.endpoint}/api/v1/tasks/${encodeURIComponent(
               taskId.trim()
             )}${query}`,
-            { method: "GET", headers: getHeaders(effective.apiKey) }
+            {
+              method: "GET",
+              headers: getHeaders(effective.apiKey),
+              redirect: "error",
+              signal: AbortSignal.timeout(10000),
+            }
           ).catch(() => null);
 
           if (!daemonRes) {
