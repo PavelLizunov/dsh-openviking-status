@@ -458,17 +458,36 @@ export function apply(ctx: any, config?: OpenVikingConfig) {
             .json()
             .catch(() => ({}))) as Record<string, unknown>;
 
-          // V3 FIX: Probe authorization against session endpoint with refined classification
-          const probeCandidate = "dsh-session-test-probe";
-          const authProbe = await fetch(
-            `${targetUrl}/api/v1/sessions/${probeCandidate}`,
-            {
-              method: "GET",
-              headers: getHeaders(targetKey),
-              redirect: "error",
-              signal: AbortSignal.timeout(5000),
+          // V3 FIX: Probe authorization against tasks endpoint, falling back to session probe
+          let authProbe = await fetch(`${targetUrl}/api/v1/tasks?limit=1`, {
+            method: "GET",
+            headers: getHeaders(targetKey),
+            redirect: "error",
+            signal: AbortSignal.timeout(5000),
+          }).catch((err) => ({ status: 0, statusText: err.message }) as any);
+
+          if (authProbe && authProbe.status === 404) {
+            const probeCandidate = "dsh-session-test-probe";
+            const sessionProbe = await fetch(
+              `${targetUrl}/api/v1/sessions/${probeCandidate}`,
+              {
+                method: "GET",
+                headers: getHeaders(targetKey),
+                redirect: "error",
+                signal: AbortSignal.timeout(5000),
+              }
+            ).catch(() => null);
+            if (sessionProbe) {
+              if (
+                sessionProbe.status === 200 ||
+                (sessionProbe.status === 404 && Boolean(targetKey))
+              ) {
+                authProbe = { status: 200, statusText: "OK" } as any;
+              } else {
+                authProbe = sessionProbe;
+              }
             }
-          ).catch((err) => ({ status: 0, statusText: err.message }) as any);
+          }
 
           const probeResult = classifyAuthProbe(
             authProbe ? authProbe.status : 0
