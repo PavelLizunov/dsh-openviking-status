@@ -15,6 +15,8 @@ const CLOUD_METADATA_IPS = new Set([
   "169.254.170.2",
   "metadata.google.internal",
   "100.100.100.200",
+  "[fd00:ec2::254]",
+  "fd00:ec2::254",
 ]);
 
 const SUPPORTED_METHODS = new Set([
@@ -40,20 +42,33 @@ export function isLoopbackHost(hostHeader: string | undefined | null): boolean {
     const ipv6Addr = host.slice(1, closeBracket).toLowerCase();
     const remainder = host.slice(closeBracket + 1);
     if (remainder && !/^:\d+$/.test(remainder)) return false;
-    return ipv6Addr === "::1";
+    return (
+      ipv6Addr === "::1" ||
+      ipv6Addr === "0:0:0:0:0:0:0:1" ||
+      ipv6Addr === "::ffff:127.0.0.1"
+    );
   }
 
-  // 2. Handle IPv4 / hostname with optional port
-  const lastColon = host.lastIndexOf(":");
-  if (lastColon > 0) {
-    const portPart = host.slice(lastColon + 1);
-    if (/^\d+$/.test(portPart)) {
-      host = host.slice(0, lastColon);
+  // 2. Handle IPv4 / hostname with optional port (do not strip if bare IPv6 with multiple colons)
+  if (!host.includes("::")) {
+    const lastColon = host.lastIndexOf(":");
+    if (lastColon > 0) {
+      const portPart = host.slice(lastColon + 1);
+      if (/^\d+$/.test(portPart)) {
+        host = host.slice(0, lastColon);
+      }
     }
   }
   host = host.toLowerCase().trim();
 
-  if (host === "localhost" || host === "::1") return true;
+  if (
+    host === "localhost" ||
+    host === "::1" ||
+    host === "0:0:0:0:0:0:0:1" ||
+    host === "::ffff:127.0.0.1"
+  ) {
+    return true;
+  }
 
   // 3. Strict IPv4 127.0.0.0/8 check: exactly four decimal numbers separated by dots
   const ipv4Match = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
@@ -88,7 +103,11 @@ export function validateEndpointUrl(rawUrl: string): string {
   }
 
   const hostname = parsed.hostname.toLowerCase();
-  if (CLOUD_METADATA_IPS.has(hostname) || hostname.startsWith("169.254.")) {
+  if (
+    CLOUD_METADATA_IPS.has(hostname) ||
+    hostname.startsWith("169.254.") ||
+    hostname.startsWith("fe80:")
+  ) {
     throw new Error(
       `Access to link-local cloud metadata destination "${hostname}" is prohibited (SSRF prevention)`
     );
@@ -107,9 +126,16 @@ export function enforceTrustFence(
   options: TrustFenceOptions = {}
 ): boolean {
   const trustedHosts = options.trustedHosts || [
+    "localhost",
     "localhost:3080",
+    "127.0.0.1",
     "127.0.0.1:3080",
     "harness-test.tail9fd337.ts.net",
+    "harness-test.tail9fd337.ts.net:3080",
+    "100.82.20.44",
+    "100.82.20.44:3080",
+    "harness-test",
+    "harness-test:3080",
   ];
   const method = (req.method || "GET").toUpperCase();
 
@@ -127,10 +153,18 @@ export function enforceTrustFence(
 
   // 2. Host header validation
   const hostHeader = req.headers["host"];
+  const hostWithoutPort = hostHeader ? hostHeader.replace(/:\d+$/, "") : "";
   const hostOk =
     isLoopbackHost(hostHeader) ||
     (hostHeader &&
-      trustedHosts.some((th) => th.toLowerCase() === hostHeader.toLowerCase()));
+      trustedHosts.some((th) => {
+        const thLower = th.toLowerCase();
+        const hLower = hostHeader.toLowerCase();
+        const thWithoutPort = thLower.replace(/:\d+$/, "");
+        return (
+          hLower === thLower || hostWithoutPort.toLowerCase() === thWithoutPort
+        );
+      }));
   if (!hostOk) {
     res.writeHead(403, { "Content-Type": "application/json" });
     res.end(
@@ -143,7 +177,7 @@ export function enforceTrustFence(
   if (MUTATING_METHODS.has(method)) {
     // 3a. Content-Type check (blocks simple form submissions)
     const contentType = (req.headers["content-type"] || "").toLowerCase();
-    if (!contentType.includes("application/json")) {
+    if (!/^application\/json(;.*)?$/i.test(contentType.trim())) {
       res.writeHead(415, { "Content-Type": "application/json" });
       res.end(
         JSON.stringify({

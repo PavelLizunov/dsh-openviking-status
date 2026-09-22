@@ -422,18 +422,30 @@ function StatusChipView({
   useEffect(() => {
     if (typeof document === "undefined") return;
 
+    let observer: MutationObserver | null = null;
     function findHost() {
       const el = document.querySelector("[data-composer-stats]");
-      setStatsHost((prev) => (prev !== el ? el : prev));
+      if (el) {
+        setStatsHost(el);
+        if (observer) {
+          observer.disconnect();
+          observer = null;
+        }
+      }
     }
 
     findHost();
 
-    const observer = new MutationObserver(() => {
+    observer = new MutationObserver(() => {
       findHost();
     });
     observer.observe(document.body, { childList: true, subtree: true });
-    return () => observer.disconnect();
+    return () => {
+      if (observer) {
+        observer.disconnect();
+        observer = null;
+      }
+    };
   }, []);
 
   // Источник текста диалога: готовая строка либо переданные узлы. Вариант с

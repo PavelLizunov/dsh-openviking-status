@@ -88,6 +88,8 @@ test("Security V4: Trust Fence - Host, Origin & CSRF Protection", () => {
   assert.strictEqual(isLoopbackHost("127.0.0.1:3080"), true);
   assert.strictEqual(isLoopbackHost("[::1]:3080"), true);
   assert.strictEqual(isLoopbackHost("[::1]"), true);
+  assert.strictEqual(isLoopbackHost("[0:0:0:0:0:0:0:1]:3080"), true);
+  assert.strictEqual(isLoopbackHost("[::ffff:127.0.0.1]:3080"), true);
   assert.strictEqual(isLoopbackHost("127.255.0.1:80"), true);
 
   // Attack bypasses rejected

@@ -68,31 +68,37 @@ export function inferCategory(uri: string): string | undefined {
 /**
  * Safely extracts combined text from strings, message arrays, or objects.
  */
-function extractAllText(input: unknown): string {
-  if (input == null) return "";
+function extractAllText(input: unknown, depth = 0): string {
+  if (input == null || depth > 6) return "";
   if (typeof input === "string") return input;
   if (typeof input === "number" || typeof input === "boolean")
     return String(input);
   if (Array.isArray(input)) {
-    return input.map(extractAllText).filter(Boolean).join("\n");
+    return input
+      .map((item) => extractAllText(item, depth + 1))
+      .filter(Boolean)
+      .join("\n");
   }
   if (typeof input === "object") {
     const obj = input as Record<string, unknown>;
     const parts: string[] = [];
     if ("content" in obj && obj.content != null) {
-      parts.push(extractAllText(obj.content));
+      parts.push(extractAllText(obj.content, depth + 1));
     }
     if ("text" in obj && obj.text != null) {
-      parts.push(extractAllText(obj.text));
+      parts.push(extractAllText(obj.text, depth + 1));
     }
     if ("message" in obj && obj.message != null) {
-      parts.push(extractAllText(obj.message));
+      parts.push(extractAllText(obj.message, depth + 1));
     }
     if (parts.length > 0) {
       return parts.join("\n");
     }
     try {
-      return Object.values(obj).map(extractAllText).filter(Boolean).join("\n");
+      return Object.values(obj)
+        .map((val) => extractAllText(val, depth + 1))
+        .filter(Boolean)
+        .join("\n");
     } catch {
       return "";
     }
@@ -135,7 +141,8 @@ function findContextBlocks(text: string): ContextBlock[] {
         attributes: 'source="profile"',
         content: text,
       });
-    } else if (/<memory\b/i.test(text)) {
+    }
+    if (/<memory\b/i.test(text)) {
       blocks.push({
         isProfile: false,
         attributes: "",

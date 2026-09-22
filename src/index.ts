@@ -44,6 +44,7 @@ export function classifyAuthProbe(
     status === null ||
     status === undefined ||
     typeof status !== "number" ||
+    !Number.isFinite(status) ||
     status === 0
   ) {
     return {
@@ -97,6 +98,7 @@ export function classifyAuthProbe(
 function maskApiKey(key: string | undefined): string | undefined {
   if (!key || typeof key !== "string") return undefined;
   const trimmed = key.trim();
+  if (!trimmed) return undefined;
   if (trimmed.length <= 8) return "••••••••";
   return `${trimmed.slice(0, 4)}••••${trimmed.slice(-4)}`;
 }
@@ -114,10 +116,13 @@ export function redactConfigDto(effective: {
   source: string;
 } {
   const masked = maskApiKey(effective.apiKey);
+  const hasKey = Boolean(
+    effective.apiKey && effective.apiKey.trim().length > 0
+  );
   return {
     endpoint: effective.endpoint,
-    hasApiKey: Boolean(effective.apiKey),
-    apiKeyPresent: Boolean(effective.apiKey),
+    hasApiKey: hasKey,
+    apiKeyPresent: hasKey,
     apiKeyHint: masked,
     maskedApiKey: masked,
     source: effective.source,
